@@ -1,0 +1,26 @@
+#!/bin/bash
+#PBS -N p4_pretrain
+#PBS -l select=1:ncpus=4:mem=32gb:ngpus=1:gpu_type=L40S
+#PBS -l walltime=05:00:00
+#PBS -J 0-5
+#PBS -j oe
+#PBS -o /rds/general/user/jh1125/home/Individual_Project/jobs/logs/
+
+set -e
+cd $PBS_O_WORKDIR
+module load Python/3.12.3-GCCcore-13.3.0
+source .venv/bin/activate
+
+# 2 objectives × 3 backbones = 6 pretrain runs.
+OBJECTIVES=("masked" "masked" "masked" "contrastive" "contrastive" "contrastive")
+BACKBONES=("unet" "gru" "cnn_gru_par" "unet" "gru" "cnn_gru_par")
+
+IDX=$PBS_ARRAY_INDEX
+OBJ=${OBJECTIVES[$IDX]}
+BB=${BACKBONES[$IDX]}
+
+echo "[array $IDX] objective=$OBJ backbone=$BB"
+
+python -m lacewing.quantification.methods.ssl_pretrain \
+    --objective "$OBJ" --backbone "$BB" \
+    --epochs 50 --batch_size 64 --lr 1e-3 --seed 0

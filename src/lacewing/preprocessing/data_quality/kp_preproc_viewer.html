@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>KP preprocessing pipeline viewer</title>
+<script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+<style>
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: #fafafa;
+    color: #222;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    padding: 8px 14px;
+    background: #fff;
+    border-bottom: 1px solid #ddd;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  header h1 { margin: 0; font-size: 15px; font-weight: 600; }
+  header .meta { font-size: 12px; color: #666; }
+  header select {
+    font-size: 13px; padding: 4px 6px;
+    border: 1px solid #ccc; border-radius: 4px;
+  }
+  #main {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+  }
+  #sidebar {
+    width: 260px;
+    background: #fff;
+    border-right: 1px solid #ddd;
+    overflow-y: auto;
+    padding: 8px 6px;
+  }
+  #sidebar h2 {
+    font-size: 12px;
+    text-transform: uppercase;
+    color: #666;
+    margin: 4px 6px 6px;
+    letter-spacing: 0.5px;
+  }
+  .well-row {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 6px 8px;
+    margin: 1px 0;
+    font-size: 12.5px;
+    color: #222;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .well-row:hover {
+    background: #f0f4f9;
+    border-color: #dae3ec;
+  }
+  .well-row.selected {
+    background: #e6f0fb;
+    border-color: #7ea8d3;
+    font-weight: 600;
+  }
+  .well-row .conc {
+    display: inline-block;
+    min-width: 60px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11.5px;
+    color: #444;
+  }
+  .well-row .badge {
+    display: inline-block;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 600;
+    margin-left: 4px;
+    vertical-align: middle;
+  }
+  .badge.pos { background: #d9edd0; color: #1e5c1e; }
+  .badge.neg { background: #f0e0e0; color: #6b2020; }
+  .well-row .frac {
+    display: block;
+    font-size: 10.5px;
+    color: #777;
+    margin-top: 2px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  #content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 14px;
+  }
+  #titleBar {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 8px;
+  }
+  #titleBar h1 { margin: 0; font-size: 16px; }
+  #titleBar .sub { font-size: 12.5px; color: #666; }
+  .panels {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 10px;
+  }
+  .panel {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 8px 10px;
+  }
+  .panel h3 {
+    margin: 0 0 4px 0;
+    font-size: 12.5px;
+    color: #333;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 4px;
+  }
+  .panel .stat {
+    font-size: 11px;
+    color: #666;
+    margin: 0 0 4px 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  .plot { width: 100%; height: 380px; }
+  #loading { padding: 40px; text-align: center; color: #666; font-size: 13px; }
+  footer {
+    padding: 6px 14px;
+    background: #fff;
+    border-top: 1px solid #ddd;
+    font-size: 11px;
+    color: #777;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>KP preprocessing pipeline viewer</h1>
+  <label style="font-size:13px;">Chip:
+    <select id="chipSel"></select>
+  </label>
+  <span class="meta" id="chipMeta"></span>
+</header>
+
+<div id="main">
+  <aside id="sidebar">
+    <h2>Wells</h2>
+    <div id="wellList"></div>
+  </aside>
+
+  <section id="content">
+    <div id="titleBar">
+      <h1 id="wellTitle">Select a well</h1>
+      <span class="sub" id="wellSub"></span>
+    </div>
+    <div class="panels">
+      <div class="panel">
+        <h3 id="p1Title">(1) Deployed (raw z-score only)</h3>
+        <div class="stat" id="p1Stat"></div>
+        <div id="plot1" class="plot"></div>
+      </div>
+      <div class="panel">
+        <h3 id="p2Title">(2) + MAD-ABCD filter</h3>
+        <div class="stat" id="p2Stat"></div>
+        <div id="plot2" class="plot"></div>
+      </div>
+      <div class="panel">
+        <h3 id="p3Title">(3) + order-3 spatial averaging</h3>
+        <div class="stat" id="p3Stat"></div>
+        <div id="plot3" class="plot"></div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<footer>
+  Traces are chip-relative z-score residual (dimensionless). Colours: light
+  blue for amp-negative (NTC), dark blue for amp-positive (all others).
+  For each (chip, well) up to 200 pixels are plotted, sub-sampled at random.
+  Time axis is chip time in minutes.
+</footer>
+
+<script>
+const DATA_DIR = "kp_preproc_viewer_data";
+let manifest = null;
+let chipData = null;
+let selectedWell = null;
+
+const chipSel = document.getElementById("chipSel");
+const wellListEl = document.getElementById("wellList");
+const chipMetaEl = document.getElementById("chipMeta");
+const wellTitleEl = document.getElementById("wellTitle");
+const wellSubEl = document.getElementById("wellSub");
+
+async function loadManifest() {
+  const r = await fetch(DATA_DIR + "/manifest.json");
+  manifest = await r.json();
+  chipSel.innerHTML = "";
+  for (const c of manifest.chips) {
+    const o = document.createElement("option");
+    o.value = c.json;
+    o.textContent = c.chip_label;
+    o.dataset.chip = c.chip;
+    chipSel.appendChild(o);
+  }
+  chipSel.addEventListener("change", () => loadChip(chipSel.value));
+  loadChip(chipSel.value);
+}
+
+async function loadChip(jsonName) {
+  wellListEl.innerHTML = '<div style="padding:8px;color:#888;font-size:12px;">loading...</div>';
+  const r = await fetch(DATA_DIR + "/" + jsonName);
+  chipData = await r.json();
+  chipMetaEl.textContent = `${chipData.wells.length} wells · ${chipData.chip}`;
+  renderWellList();
+  if (chipData.wells.length > 0) {
+    selectWell(chipData.wells[0].well);
+  }
+}
+
+function renderWellList() {
+  wellListEl.innerHTML = "";
+  for (const w of chipData.wells) {
+    const btn = document.createElement("button");
+    btn.className = "well-row";
+    btn.dataset.well = w.well;
+    const badge = w.y === 1
+      ? '<span class="badge pos">amp+</span>'
+      : '<span class="badge neg">NTC</span>';
+    btn.innerHTML =
+      `<span class="conc">well ${w.well}  ${w.label}</span>${badge}` +
+      `<span class="frac">deployed n=${w.n_deployed} · +MAD n=${w.n_mad} (${(w.frac_mad*100).toFixed(0)}%)</span>`;
+    btn.addEventListener("click", () => selectWell(w.well));
+    wellListEl.appendChild(btn);
+  }
+}
+
+function selectWell(wellId) {
+  selectedWell = wellId;
+  for (const el of wellListEl.querySelectorAll(".well-row")) {
+    el.classList.toggle("selected", parseInt(el.dataset.well) === wellId);
+  }
+  const w = chipData.wells.find(x => x.well === wellId);
+  wellTitleEl.textContent = `Well ${w.well} · ${w.label}`;
+  const yStr = w.y === 1 ? "amp+" : "NTC";
+  const l10 = (w.log10_conc == null) ? "" : ` · log10 conc = ${w.log10_conc}`;
+  wellSubEl.textContent = `${yStr}${l10}`;
+  renderPanels(w);
+}
+
+function renderPanels(w) {
+  const t = chipData.time_min;
+  const isNTC = w.y === 0;
+  const colour = isNTC ? "rgba(80,140,200,0.35)" : "rgba(30,60,140,0.35)";
+  const panels = [
+    { id: "plot1", statId: "p1Stat", key: "deployed" },
+    { id: "plot2", statId: "p2Stat", key: "mad" },
+    { id: "plot3", statId: "p3Stat", key: "full" },
+  ];
+  // Compute shared y-range from deployed (widest) so panels are comparable
+  let ymin = 0, ymax = 0;
+  for (const p of panels) {
+    const traces = w.panels[p.key].traces;
+    for (const tr of traces) {
+      for (const v of tr) {
+        if (v < ymin) ymin = v;
+        if (v > ymax) ymax = v;
+      }
+    }
+  }
+  const pad = 0.05 * (ymax - ymin);
+  const yr = [ymin - pad, ymax + pad];
+
+  for (const p of panels) {
+    const pdata = w.panels[p.key];
+    const stat = document.getElementById(p.statId);
+    stat.textContent =
+      `n_kept=${pdata.n_kept} · n_plotted=${pdata.n_plotted}` +
+      (p.key === "deployed" ? "" : ` · retained ${(pdata.n_kept / w.n_deployed * 100).toFixed(1)}% of deployed`);
+    const traces = pdata.traces.map(y => ({
+      x: t, y: y, mode: "lines",
+      line: { color: colour, width: 0.7 },
+      hoverinfo: "skip",
+      showlegend: false,
+    }));
+    Plotly.react(p.id, traces, {
+      margin: { l: 44, r: 8, t: 4, b: 32 },
+      xaxis: { title: "time (min)", showgrid: true, gridcolor: "#eee" },
+      yaxis: { title: "trace (V, z-scored)", showgrid: true, gridcolor: "#eee", range: yr },
+      showlegend: false,
+      hovermode: false,
+      plot_bgcolor: "#fff",
+      paper_bgcolor: "#fff",
+    }, { displayModeBar: false, responsive: true });
+  }
+}
+
+loadManifest();
+</script>
+</body>
+</html>

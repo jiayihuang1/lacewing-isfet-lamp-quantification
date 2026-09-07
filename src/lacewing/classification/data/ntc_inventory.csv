@@ -1,0 +1,26 @@
+chip_name,chip_path,classification,ntc_well_indices,folder_name_hints,notes
+D20240702_E00_C05_F4500KHz_U_CoV_SD,Data/24_CoV_Quantification/Others/D20240702_E00_C05_F4500KHz_U_CoV_SD,mixed,5,,No folder hints; defaulting to standard layout.
+D20240702_E01_C06_F4500KHz_U_CoV_SD,Data/24_CoV_Quantification/Others/D20240702_E01_C06_F4500KHz_U_CoV_SD,mixed,5,,No folder hints; defaulting to standard layout.
+D20240704_E00_C00_F4500KHz_U_png6w_dilut,Data/24_CoV_Quantification/Others/D20240704_E00_C00_F4500KHz_U_png6w_dilut,mixed,5,,No folder hints; defaulting to standard layout.
+D20240704_E00_C00_F4500KHz_U_png6w_dilut_2,Data/24_CoV_Quantification/Others/D20240704_E00_C00_F4500KHz_U_png6w_dilut_2,mixed,5,,No folder hints; defaulting to standard layout.
+D20240719_E03_C44_F4500KHz_U_COV_SD,Data/24_CoV_Quantification/Others/D20240719_E03_C44_F4500KHz_U_COV_SD,mixed,5,,No folder hints; defaulting to standard layout.
+D20240719_E05_C48_F4500KHz_U_COV_SD,Data/24_CoV_Quantification/Others/D20240719_E05_C48_F4500KHz_U_COV_SD,mixed,5,,No folder hints; defaulting to standard layout.
+D20240724_E00_C00_F4500KHz_U_SD_Beads_VP,Data/24_CoV_Quantification/Others/D20240724_E00_C00_F4500KHz_U_SD_Beads_VP,mixed,5,Beads;Bead;VP,"Default: 6-well layout, well 5 = NTC. Edit if this chip uses a different layout."
+D20240724_E01_C00_F4500KHz_U_SD_Beads_VP,Data/24_CoV_Quantification/Others/D20240724_E01_C00_F4500KHz_U_SD_Beads_VP,mixed,5,Beads;Bead;VP,"Default: 6-well layout, well 5 = NTC. Edit if this chip uses a different layout."
+D20240802_E01_C00_F4500KHz_U_SD_VP,Data/24_CoV_Quantification/Others/D20240802_E01_C00_F4500KHz_U_SD_VP,mixed,5,VP,"Default: 6-well layout, well 5 = NTC. Edit if this chip uses a different layout."
+D20240802_E02_C00_F4500KHz_U_SD_VP,Data/24_CoV_Quantification/Others/D20240802_E02_C00_F4500KHz_U_SD_VP,mixed,5,VP,"Default: 6-well layout, well 5 = NTC. Edit if this chip uses a different layout."
+D20240814_E00_C00_F4500KHz_U_PnG_Bead,Data/24_CoV_Quantification/Others/D20240814_E00_C00_F4500KHz_U_PnG_Bead,mixed,5,Bead,"Default: 6-well layout, well 5 = NTC. Edit if this chip uses a different layout."
+D20240814_E00_C00_F4500KHz_U_PnG_Wet,Data/24_CoV_Quantification/Others/D20240814_E00_C00_F4500KHz_U_PnG_Wet,mixed,5,,No folder hints; defaulting to standard layout.
+D20240819_E00_C00_F4500KHz,Data/24_CoV_Quantification/Others/D20240819_E00_C00_F4500KHz,mixed,5,,No folder hints; defaulting to standard layout.
+D20240819_E00_C00_F4500KHz_U_BRAF_MT_spec,Data/24_CoV_Quantification/Others/D20240819_E00_C00_F4500KHz_U_BRAF_MT_spec,mixed,5,BRAF_MT,"Default: 6-well layout, well 5 = NTC. Edit if this chip uses a different layout."
+D20240820_E00_C00_F4500KHz,Data/24_CoV_Quantification/Others/D20240820_E00_C00_F4500KHz,mixed,5,,No folder hints; defaulting to standard layout.
+D20240820_E00_C00_F4500KHz_U_1e6,Data/24_CoV_Quantification/Others/D20240820_E00_C00_F4500KHz_U_1e6,mixed,5,1e6,"Default: 6-well layout, well 5 = NTC. Edit if this chip uses a different layout."
+D20240820_E00_C00_F4500KHz_U_Alter_31,Data/24_CoV_Quantification/Others/D20240820_E00_C00_F4500KHz_U_Alter_31,mixed,5,Alter,"Default: 6-well layout, well 5 = NTC. Edit if this chip uses a different layout."
+D20240820_E00_C00_F4500KHz_U_Pilot_V2_01,Data/24_CoV_Quantification/Others/D20240820_E00_C00_F4500KHz_U_Pilot_V2_01,mixed,5,Pilot,"Default: 6-well layout, well 5 = NTC. Edit if this chip uses a different layout."
+D20240820_E00_C00_F4500KHz_U_Pilot_V2_02,Data/24_CoV_Quantification/Others/D20240820_E00_C00_F4500KHz_U_Pilot_V2_02,mixed,5,Pilot,"Default: 6-well layout, well 5 = NTC. Edit if this chip uses a different layout."
+D20240821_E00_C00_F4500KHz,Data/24_CoV_Quantification/Others/D20240821_E00_C00_F4500KHz,mixed,5,,No folder hints; defaulting to standard layout.
+D20240821_E00_C00_F4500KHz_U_Alter_01,Data/24_CoV_Quantification/Others/D20240821_E00_C00_F4500KHz_U_Alter_01,mixed,5,Alter,"Default: 6-well layout, well 5 = NTC. Edit if this chip uses a different layout."
+D20240821_E00_C00_F4500KHz_U_Alter_21,Data/24_CoV_Quantification/Others/D20240821_E00_C00_F4500KHz_U_Alter_21,mixed,5,Alter,"Default: 6-well layout, well 5 = NTC. Edit if this chip uses a different layout."
+D20240823_E00_C00_F4500KHz,Data/24_CoV_Quantification/Others/D20240823_E00_C00_F4500KHz,mixed,5,,No folder hints; defaulting to standard layout.
+D20240823_E02_C00_F4500KHz,Data/24_CoV_Quantification/Others/D20240823_E02_C00_F4500KHz,mixed,5,,No folder hints; defaulting to standard layout.
+D20240823_E04_C00_F4500KHz,Data/24_CoV_Quantification/Others/D20240823_E04_C00_F4500KHz,mixed,5,,No folder hints; defaulting to standard layout.

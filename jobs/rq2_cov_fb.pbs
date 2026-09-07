@@ -1,0 +1,97 @@
+#!/bin/bash
+# p1_fb: F-B sliding-window classifier (Paper 18 adaptation).
+#
+# CNN-GRU-par backbone. Slides length-W windows across each pixel's trace,
+# classifies each window as pre-amp / post-amp, aggregates to TTP via the
+# first-K-consecutive-positive rule.
+#
+# Outputs in:
+#   Analysis/quantification/methods/results/p1_fb_slide_cls_w{W}_stride{S}_spatA3/seed{SEED}/
+#
+# Submit (from the project root on HPC):
+#
+#   qsub -v SEED=0 jobs/p1_fb.pbs
+#
+# Override window / stride / K at submit time:
+#
+#   qsub -v SEED=1,WINDOW=90,STRIDE=8 jobs/p1_fb.pbs
+#
+#PBS -N p1_fb
+#PBS -l select=1:ncpus=4:mem=16gb:ngpus=1
+#PBS -l walltime=02:00:00
+#PBS -j oe
+#PBS -o /rds/general/user/jh1125/home/Individual_Project/jobs/logs/
+
+PROJECT_DIR="/rds/general/user/$USER/home/Individual_Project"
+LOG_DIR="$PROJECT_DIR/jobs/logs"
+mkdir -p "$LOG_DIR" || true
+
+TASK_LOG="$LOG_DIR/p1_fb_${PBS_JOBID:-local}.log"
+exec > >(tee -a "$TASK_LOG") 2>&1
+
+echo "==> TASK_LOG: $TASK_LOG"
+echo "==> PBS_JOBID: ${PBS_JOBID:-<none>}"
+echo "==> hostname: $(hostname)"
+echo "==> pwd at job start: $(pwd)"
+echo "==> Started at $(date)"
+
+set -euo pipefail
+
+SEED="${SEED:-0}"
+WINDOW="${WINDOW:-60}"
+STRIDE="${STRIDE:-5}"
+K="${K:-3}"
+EPOCHS="${EPOCHS:-30}"
+echo "==> Running F-B sliding-window classifier: seed=${SEED} window=${WINDOW} stride=${STRIDE} K=${K} epochs=${EPOCHS}"
+
+echo "==> module list before load:"; module list 2>&1 || true
+module load Python/3.12.3-GCCcore-13.3.0
+echo "==> module list after load:"; module list 2>&1 || true
+
+cd "$PROJECT_DIR"
+echo "==> cwd is now: $(pwd)"
+
+if [[ -d .venv ]]; then
+    echo "==> activating .venv"
+    # shellcheck disable=SC1091
+    source .venv/bin/activate
+    echo "==> python is now: $(command -v python)"
+    echo "==> python version: $(python --version 2>&1)"
+else
+    echo "==> WARNING: .venv directory not found at $PROJECT_DIR/.venv"
+fi
+
+echo "==> import smoke test:"
+python -c "import sys, torch, numpy, scipy, sklearn; print('python', sys.version.split()[0], '| torch', torch.__version__, '| numpy', numpy.__version__)" || {
+    echo "==> FATAL: required packages missing."
+    exit 2
+}
+
+# --- ensure the spatA3 regression cache exists -----------------------
+CACHE_FILE="$PROJECT_DIR/Analysis/regression/data/cache/regress_all_filt_abcd_ntcRaw_madk1p5_spatA3.npz"
+if [[ ! -f "$CACHE_FILE" ]]; then
+    echo "==> spatA3 regression cache missing, building it now..."
+    python -m lacewing.quantification.regression_shared.data.build_spatial_filtered_regression_cache \
+        --input regress_all_filt_abcd_ntcRaw_madk1p5 \
+        --order 3
+else
+    echo "==> spatA3 regression cache present: $CACHE_FILE"
+fi
+
+# --- device autodetect ----------------------------------------------
+if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L | grep -q GPU; then
+    DEVICE=cuda
+else
+    DEVICE=cpu
+fi
+echo "==> Device: $DEVICE"
+
+# --- run F-B sliding-window classifier ------------------------------
+python -m lacewing.quantification.methods.sliding_window_cls \
+    --seed "$SEED" \
+    --window "$WINDOW" \
+    --stride "$STRIDE" \
+    --k_consecutive "$K" \
+    --epochs "$EPOCHS"
+
+echo "==> Finished at $(date)"

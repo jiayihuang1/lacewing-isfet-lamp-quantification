@@ -1,0 +1,7 @@
+method_id,seed,ckpt,n_val_pixels,n_val_timesteps,overall_acc,acc_baseline,acc_drift,acc_rising,acc_post_amp
+p1_fd_manual4_spatA3,0,best.pt,1127,507150,0.9756,0.9357,0.9903,0.9674,0.9229
+p1_fd_manual4_spatA3,0,last.pt,1127,507150,0.9386,0.9897,0.9132,0.9785,0.7458
+p1_fd_manual4_spatA3,1,best.pt,1006,452700,0.9588,0.8165,0.9885,0.9792,0.8601
+p1_fd_manual4_spatA3,1,last.pt,1006,452700,0.9581,0.8051,0.9925,0.9749,0.8608
+p1_fd_manual4_spatA3,2,best.pt,1127,507150,0.9645,0.8699,0.9852,0.9791,0.7512
+p1_fd_manual4_spatA3,2,last.pt,1127,507150,0.9495,0.9718,0.9483,0.9508,0.8058

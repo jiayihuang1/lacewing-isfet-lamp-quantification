@@ -1,0 +1,103 @@
+#!/bin/bash
+# exp6: train on 5 Final chips, test on 2 SD chips.
+# 7 models x 3 seeds = 21 array elements (PBS_ARRAY_INDEX 0..20).
+#
+# Submit (from the project root on HPC):
+#   qsub jobs/exp6_sweep.pbs
+#
+# Monitor:
+#   qstat -t -u $USER
+#
+# GPU is the default. For CPU, swap the GPU select line below for the CPU
+# variant and bump the walltime to 8h (FCN/ResNet/Inception otherwise time
+# out at ~23/40 epochs).
+#
+#PBS -N exp6_sweep
+#PBS -J 0-20
+#PBS -l select=1:ncpus=4:mem=16gb:ngpus=1
+#PBS -l walltime=02:00:00
+#PBS -j oe
+# Absolute path required (PBS does NOT expand $HOME in directives).
+# Replace /rds/general/user/jh1125 if your account is different.
+#PBS -o /rds/general/user/jh1125/home/Individual_Project/jobs/logs/
+
+## CPU variant (uncomment + comment out the GPU select above):
+##PBS -l select=1:ncpus=4:mem=16gb
+##PBS -l walltime=08:00:00
+##   ANN+1D-DCNN+AE+cnn2d_spec fit in 4h on CPU; FCN/ResNet/Inception need 8h.
+
+# Defensive: don't die on the first error before we've at least logged
+# something. We re-enable strict mode after the log file is set up.
+PROJECT_DIR="/rds/general/user/$USER/home/Individual_Project"
+LOG_DIR="$PROJECT_DIR/jobs/logs"
+mkdir -p "$LOG_DIR" || true
+
+# Per-task log file. tee everything (stdout + stderr) here so even if PBS's
+# own .o file disappears we have a copy on disk we can inspect.
+TASK_LOG="$LOG_DIR/exp6_${PBS_JOBID:-local}_idx${PBS_ARRAY_INDEX:-0}.log"
+exec > >(tee -a "$TASK_LOG") 2>&1
+
+echo "==> TASK_LOG: $TASK_LOG"
+echo "==> PBS_JOBID: ${PBS_JOBID:-<none>}"
+echo "==> PBS_ARRAY_INDEX: ${PBS_ARRAY_INDEX:-<none>}"
+echo "==> hostname: $(hostname)"
+echo "==> pwd at job start: $(pwd)"
+echo "==> Started at $(date)"
+
+# NOW switch to strict mode (we have logging captured first).
+set -euo pipefail
+
+# Map the 0..20 array index to one (model, seed) cell.
+MODELS=(ann cnn1d fcn resnet inception autoencoder cnn2d_spec)
+SEEDS=(0 1 2)
+N_SEEDS=${#SEEDS[@]}
+IDX=${PBS_ARRAY_INDEX:-0}
+MODEL_I=$(( IDX / N_SEEDS ))
+SEED_I=$(( IDX % N_SEEDS ))
+MODEL="${MODELS[$MODEL_I]}"
+SEED="${SEEDS[$SEED_I]}"
+
+echo "==> Array task ${IDX}: model=${MODEL} seed=${SEED}"
+
+# --- module load + venv ---
+echo "==> module list before load:"; module list 2>&1 || true
+module load Python/3.12.3-GCCcore-13.3.0
+echo "==> module list after load:"; module list 2>&1 || true
+
+cd "$PROJECT_DIR"
+echo "==> cwd is now: $(pwd)"
+
+if [[ -d .venv ]]; then
+    echo "==> activating .venv"
+    # shellcheck disable=SC1091
+    source .venv/bin/activate
+    echo "==> python is now: $(command -v python)"
+    echo "==> python version: $(python --version 2>&1)"
+else
+    echo "==> WARNING: .venv directory not found at $PROJECT_DIR/.venv"
+fi
+
+# Quick import smoke test BEFORE the real job — if torch is missing, we
+# want to know in 1 line, not by failing inside the training script.
+echo "==> import smoke test:"
+python -c "import sys, torch, numpy, scipy, sklearn, yaml; print('python', sys.version.split()[0], '| torch', torch.__version__, '| numpy', numpy.__version__)" || {
+    echo "==> FATAL: required packages missing. Run inside the venv on a login node:"
+    echo "    pip install torch numpy scipy scikit-learn pyyaml matplotlib pandas"
+    exit 2
+}
+
+# --- detect device. If the GPU select line is on, CUDA will be visible. ---
+if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L | grep -q GPU; then
+    DEVICE=cuda
+else
+    DEVICE=cpu
+fi
+echo "==> Device: $DEVICE"
+
+# --- run one cell ---
+python -m lacewing.classification.experiments.run_exp6 \
+    --model "$MODEL" \
+    --seed "$SEED" \
+    --device "$DEVICE"
+
+echo "==> Finished at $(date)"

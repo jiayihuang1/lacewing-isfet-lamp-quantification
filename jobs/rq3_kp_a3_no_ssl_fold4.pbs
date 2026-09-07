@@ -1,0 +1,31 @@
+#!/bin/bash
+#PBS -N conc_e4f4_a3
+#PBS -l select=1:ncpus=4:mem=32gb:ngpus=1:gpu_type=L40S
+#PBS -l walltime=03:30:00
+#PBS -J 0-4
+#PBS -j oe
+#PBS -o /rds/general/user/jh1125/home/Individual_Project/jobs/logs/
+
+# E4 fold-4-only: A3 joint (no SSL) on KP, single fixed test chip (chip 4).
+# 5 seeds.  α=0.5.
+
+set -e
+cd $PBS_O_WORKDIR
+module load Python/3.12.3-GCCcore-13.3.0
+source .venv/bin/activate
+
+SEED=$PBS_ARRAY_INDEX
+FOLD=4
+
+echo "[array $PBS_ARRAY_INDEX] fold=loco${FOLD}  seed=$SEED"
+
+python -m lacewing.quantification.methods.joint_cls_quant \
+    --cache-stem "regress_conc_loco${FOLD}" \
+    --arch a3 \
+    --alpha 0.5 \
+    --seed "$SEED" \
+    --window 120 \
+    --stride 10 \
+    --k_consecutive 3 \
+    --k_thr 0.7 \
+    --epochs 30

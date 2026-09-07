@@ -1,0 +1,621 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Quantification Results Viewer</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    margin: 0; padding: 14px; background: #fafafa; color: #222;
+  }
+  h1 { font-size: 18px; margin: 0 0 10px 0; }
+  h2 { font-size: 14px; margin: 14px 0 6px 0; }
+  h3 { font-size: 12.5px; margin: 4px 6px 2px; color: #444; font-weight: 600; }
+  .status { font-size: 12px; color: #888; margin-left: 8px; }
+
+  .panel {
+    display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end;
+    padding: 10px 12px; background: #fff; border: 1px solid #e0e0e0;
+    border-radius: 8px; margin-bottom: 12px;
+  }
+  .field { display: flex; flex-direction: column; min-width: 200px; }
+  .field label { font-size: 11px; color: #666; margin-bottom: 4px; }
+  select { font-size: 13px; padding: 6px 8px; border: 1px solid #c8c8c8;
+           border-radius: 6px; background: #fff; color: #222; }
+  option { background: #fff; color: #222; }
+
+  .headline {
+    background: #fff; border: 1px solid #e0e0e0; border-radius: 8px;
+    padding: 10px 14px; margin-bottom: 12px;
+    font-size: 13px; line-height: 1.5;
+  }
+  .headline .num { font-weight: 600; color: #1f3a6b; }
+  .headline .method-id { font-family: ui-monospace, monospace; font-size: 12px; color: #666; }
+
+  .grid {
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;
+    margin-bottom: 12px;
+  }
+  .plot-card {
+    background: #fff; border: 1px solid #e0e0e0; border-radius: 8px;
+    padding: 6px 8px;
+  }
+  .plot-card .note {
+    font-size: 10.5px; color: #888; margin: 0 6px 4px; line-height: 1.4;
+  }
+  .plot { width: 100%; height: 350px; }
+  table.tbl { border-collapse: collapse; width: 100%; font-size: 11px; }
+  table.tbl th, table.tbl td { padding: 4px 8px; text-align: right; }
+  table.tbl th {
+    background: #f1f5fb; text-align: left; color: #1f3a6b;
+    position: sticky; top: 0; z-index: 2;
+  }
+  table.tbl td.k { text-align: left; font-family: ui-monospace, monospace; font-size: 10.5px; }
+  table.tbl tr.even { background: #fafbfd; }
+  table.tbl tr.selected {
+    background: #ffefc9 !important;
+    font-weight: 600;
+  }
+  table.tbl tr.selected td { border-top: 2px solid #b30000; border-bottom: 2px solid #b30000; }
+
+  .obs {
+    background: #f3f7fb; border: 1px solid #d8e3f0;
+    border-radius: 8px; padding: 10px 14px;
+    font-size: 12.5px; line-height: 1.55; color: #1f3a6b;
+    margin-bottom: 14px;
+  }
+  .obs ul { margin: 6px 0 0 18px; padding: 0; }
+  .obs li { margin: 4px 0; }
+
+  .method-summary {
+    background: #fff;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-bottom: 12px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: #222;
+  }
+  .method-summary h3 {
+    font-size: 13px; margin: 0 0 6px 0;
+    color: #1f3a6b; font-weight: 700;
+  }
+  .method-summary .row {
+    display: grid;
+    grid-template-columns: 130px 1fr;
+    gap: 4px 12px;
+    align-items: baseline;
+  }
+  .method-summary .row .k {
+    font-size: 11px; color: #666; font-weight: 600;
+  }
+  .method-summary .row .v {
+    font-size: 12px; color: #222;
+  }
+  .method-summary .provenance {
+    margin-top: 6px; font-size: 11px; color: #666; font-style: italic;
+  }
+
+  @media (max-width: 1100px) { .grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<h1>Quantification Results Viewer
+  <span class="status" id="status">loading …</span>
+</h1>
+
+<div class="obs">
+  <b>What you're looking at.</b>  Every quantification method (rule-based
+  landmarks, F4-wMSE PDF regression, P1 framings once they land) drops
+  a canonical predictions.npz + labels.npz into its run dir; the harness
+  computes 15 scalar metrics per method.  This viewer shows both
+  aggregate metrics (bottom table, selected row highlighted) and per-pixel
+  predictions (top plots).  Dropdowns pick method family + seed + well.
+</div>
+
+<div class="panel">
+  <div class="field">
+    <label>Method family</label>
+    <select id="family"></select>
+  </div>
+  <div class="field">
+    <label>Seed</label>
+    <select id="seed"></select>
+  </div>
+  <div class="field">
+    <label>Well</label>
+    <select id="well"></select>
+  </div>
+  <div class="field">
+    <label>View</label>
+    <select id="view">
+      <option value="per_pixel">Per-pixel</option>
+      <option value="per_well">Per-well (mean)</option>
+      <option value="both">Both</option>
+    </select>
+  </div>
+</div>
+
+<div class="method-summary" id="method-summary">…</div>
+
+<div class="headline" id="headline">…</div>
+
+<div class="grid">
+  <div class="plot-card">
+    <h3>1. Traces in the selected well — predicted TTP vs qLAMP TTP</h3>
+    <div class="note" id="note_traces">
+      Grey lines = sampled per-pixel ISFET traces from the selected well.
+      Red dashed vertical = qLAMP TTP (well label).
+      Orange dashed vertical = model's predicted well-mean TTP.
+      Faint orange verticals = each pixel's individual predicted TTP.
+    </div>
+    <div class="plot" id="plot_traces"></div>
+  </div>
+  <div class="plot-card">
+    <h3>2. TTP vs log₁₀(concentration) — qLAMP reference vs model prediction</h3>
+    <div class="note">
+      X = log₁₀(starting concentration).  Two lines overlaid:
+      red = qLAMP TTP (ground-truth calibration curve),
+      orange = model's well-mean predicted TTP.
+      Error bars on the orange line = within-well predicted-TTP std.
+      Selected well highlighted.
+    </div>
+    <div class="plot" id="plot_per_well"></div>
+  </div>
+</div>
+
+<h2>Scoreboard (selected row highlighted)</h2>
+<div class="plot-card" style="padding: 8px 12px; max-height: 400px; overflow-y: auto;">
+  <table id="summary-table" class="tbl"></table>
+</div>
+
+<script>
+let DATA = null;
+let FAMILY = null, SEED = null, WELL_KEY = null, VIEW = "both";
+
+// --- Method-family summaries (architecture + training + TTP extraction) -----
+// Keyed by the family names that export_viewer_data.py emits.
+const METHOD_INFO = {
+  "rule_ttp": {
+    name: "Rule-based TTP (threshold-derivative)",
+    input: "Whole trace (well-mean signal, 450 samples)",
+    architecture: "Hand-crafted DSP: bandpass smooth → 2nd derivative → threshold crossing",
+    training: "No training — deterministic landmark extraction",
+    ttp_extraction: "TTP = first time-step where dV/dt crosses a per-chip threshold",
+    provenance: "Moser 2022 (Paper 6) — deployed Lacewing quantification pipeline",
+  },
+  "rule_sdm": {
+    name: "Rule-based SDM (Second-Derivative Maximum)",
+    input: "Whole trace (well-mean signal, 450 samples)",
+    architecture: "Hand-crafted DSP: smooth → 2nd derivative → argmax",
+    training: "No training — deterministic landmark extraction",
+    ttp_extraction: "TTP = argmax(2nd derivative) — where the amplification curve inflects",
+    provenance: "Standard qPCR landmark from Moniri 2019 (Paper 7 lineage)",
+  },
+  "rule_cy0": {
+    name: "Rule-based Cy0 (Richards-5-parameter tangent)",
+    input: "Whole trace (well-mean signal, 450 samples)",
+    architecture: "Non-linear least-squares fit of Richards 5-parameter sigmoid → tangent at inflection",
+    training: "No training — scipy.optimize.curve_fit per well",
+    ttp_extraction: "TTP = x-intercept of tangent line drawn at the inflection point",
+    provenance: "Guescini 2008 / Rodriguez-Manzano 2019 — classical qPCR landmark",
+  },
+  "f4_wmse": {
+    name: "F-A / F4 weighted MSE PDF regression (baseline)",
+    input: "Whole trace (B, 1, 450) — no windowing",
+    architecture: "cnn1d-per-step: existing CNN1D encoder with MaxPool removed + per-timestep sigmoid head; ~9k params",
+    training: "40 epochs, Adam lr=1e-3, batch_size=32.  Target = Gaussian centred on qLAMP-TTP index (σ=5 samples).  Loss = weighted MSE (base=0.1, up-weights non-zero target region).  Checkpoint = best-by-val-TTP-MAE (P7.5 fix; was buggy in Week 11 debrief).",
+    ttp_extraction: "TTP = argmax(predicted density curve) / 15 samples-per-min",
+    provenance: "Direct adaptation of Dempster 2024 sleep-event PDF regression; own choice of cnn1d-per-step backbone",
+  },
+  "p1_fb": {
+    name: "F-B — Sliding-window classifier (Paper 18 adaptation)",
+    input: "Windows of length W=60 samples (4 min), stride 5 samples (20 s) → 79 windows per trace",
+    architecture: "CNN-GRU-par per window: parallel CNN branch (Conv1D 1→64→32 + MaxPool) + BiGRU branch (hidden=64, 2 layers) → concat → linear → 1 sigmoid; ~350k params total",
+    training: "30 epochs, Adam lr=1e-3, batch_size=256.  Label per window = 1 iff window centre ≥ qLAMP-TTP index.  Loss = BCE-with-logits.",
+    ttp_extraction: "First window where P(post-amp) > 0.5 for K=3 consecutive windows; TTP = centre-of-first-such-window / 15",
+    provenance: "Adaptation of Li 2024 (Paper 18) §6 / Algorithm 1 — sliding-window CUSUM generalisation.  CNN-GRU-par backbone is RQ1 pre-screen winner.",
+  },
+  "p1_fc": {
+    name: "F-C — Sliding-window regression (own design)",
+    input: "Same windows as F-B (79 × 60-sample windows per trace)",
+    architecture: "CNN-GRU-par per window → linear head, 1 signed scalar output per window; ~350k params",
+    training: "30 epochs, Adam lr=1e-3, batch_size=256.  Label per window = (TTP_min − window_centre_min), signed.  Loss = Huber (δ=1.0).",
+    ttp_extraction: "TTP = centre of window whose predicted minutes-until-TTP is closest to zero (argmin |Δ|) / 15",
+    provenance: "Own design — natural interpolation between F-B (hard binary target) and F-A (Gaussian density target)",
+  },
+  "p1_fd": {
+    name: "F-D — 1D U-Net segmentation (Paper 19 adaptation)",
+    input: "Whole trace (B, 1, 450)",
+    architecture: "1D U-Net: 5-block encoder (base_channels=8, expanding to 128), 4-block decoder with full-scale skip connections, kernel=9; ~500k params",
+    training: "30 epochs, Adam lr=1e-3, batch_size=32.  Per-pixel per-timestep 4-class labels from qLAMP-TTP: pre-amp (t < TTP−30) / onset-window (TTP−30 ≤ t < TTP) / amp (TTP ≤ t < TTP+90) / plateau.  Loss = cross-entropy per timestep.",
+    ttp_extraction: "TTP = first timestep where argmax ∈ {onset-window, amp} / 15",
+    provenance: "Adaptation of Joung 2024 (Paper 19) ECG P/QRS/T/none delineation to ISFET-LAMP",
+  },
+  "p1_fe": {
+    name: "F-E — Full-trace BiGRU per-timestep classifier",
+    input: "Whole trace (B, 1, 450)",
+    architecture: "2-layer BiGRU (hidden=64) with dropout 0.1 + per-timestep linear head (2×hidden → 1 sigmoid); ~100k params",
+    training: "30 epochs, Adam lr=1e-3, batch_size=128.  Per-timestep binary label = 1 iff t ≥ qLAMP-TTP index.  Loss = BCE-with-logits per timestep.",
+    ttp_extraction: "First timestep where sigmoid(logits) > 0.5 for K=5 consecutive timesteps; TTP / 15",
+    provenance: "Adaptation of Li 2024 (Paper 18) — bidirectional NN is a strict generalisation of CUSUM (Lemma 3.1).  Own instantiation on ISFET.",
+  },
+};
+
+// SD well_id → log10(concentration) (from Analysis/regression/data/labels.py).
+const SD_WELL_LOGCONC = {0: 9, 1: 8, 2: 7, 3: 6, 4: 5};
+
+function $(id) { return document.getElementById(id); }
+
+function fmt(x, dp = 3) {
+  if (x == null || !isFinite(Number(x))) return "—";
+  return Number(x).toFixed(dp);
+}
+
+function fmt2(x) { return fmt(x, 2); }
+function fmtInt(x) { return x == null ? "—" : Math.round(x).toString(); }
+
+fetch("quant_viewer_data.json")
+  .then(r => r.json())
+  .then(d => {
+    DATA = d;
+    $("status").textContent = "loaded.";
+    initControls();
+    render();
+    renderSummary();
+  })
+  .catch(e => {
+    $("status").innerHTML = 'failed to load JSON from file:// URL ' +
+      '(browser CORS restriction).  ' +
+      '<b>Open <code>quant_viewer_standalone.html</code> instead</b> ' +
+      '(regenerate via <code>python -m Analysis.quantification.viewer.export_viewer_data</code>).';
+  });
+
+function initControls() {
+  const fSel = $("family");
+  DATA.families.forEach(fam => {
+    const o = document.createElement("option");
+    o.value = fam; o.textContent = fam;
+    fSel.appendChild(o);
+  });
+  FAMILY = DATA.families[0];
+  fSel.value = FAMILY;
+  fSel.addEventListener("change", e => {
+    FAMILY = e.target.value;
+    initSeedControl();
+    initWellControl();
+    render();
+    renderSummary();
+  });
+
+  initSeedControl();
+  initWellControl();
+
+  $("view").addEventListener("change", e => {
+    VIEW = e.target.value;
+    render();
+  });
+}
+
+function initSeedControl() {
+  const sSel = $("seed");
+  sSel.innerHTML = "";
+  const seeds = Object.keys(DATA.cells[FAMILY].seeds).sort((a, b) => {
+    // "-" first (for rule-based non-seed methods), then numeric ascending.
+    if (a === "-") return -1;
+    if (b === "-") return 1;
+    return Number(a) - Number(b);
+  });
+  seeds.forEach(s => {
+    const o = document.createElement("option");
+    o.value = s;
+    o.textContent = s === "-" ? "(no seed)" : `seed ${s}`;
+    sSel.appendChild(o);
+  });
+  SEED = seeds[0];
+  sSel.value = SEED;
+  sSel.onchange = e => {
+    SEED = e.target.value;
+    initWellControl();
+    render();
+    renderSummary();
+  };
+}
+
+function initWellControl() {
+  const wSel = $("well");
+  wSel.innerHTML = "";
+  const cell = DATA.cells[FAMILY].seeds[SEED];
+  const wellKeys = Object.keys(cell.per_well).sort((a, b) => {
+    const la = cell.per_well[a].log10_conc;
+    const lb = cell.per_well[b].log10_conc;
+    return lb - la;  // sort by log_conc descending (highest concentration first)
+  });
+  wellKeys.forEach(k => {
+    const w = cell.per_well[k];
+    const o = document.createElement("option");
+    o.value = k;
+    o.textContent = `log₁₀(conc)=${w.log10_conc}  (well ${w.well_id}, qLAMP TTP = ${w.y_true_min} min)`;
+    wSel.appendChild(o);
+  });
+  WELL_KEY = wellKeys[0];
+  wSel.value = WELL_KEY;
+  wSel.onchange = e => { WELL_KEY = e.target.value; render(); };
+}
+
+function currentCell() {
+  return DATA.cells[FAMILY].seeds[SEED];
+}
+
+function currentSample() {
+  const cell = currentCell();
+  return cell.per_pixel_samples.find(s => s.well_key === WELL_KEY);
+}
+
+function render() {
+  const cell = currentCell();
+  const sample = currentSample();
+  const wellRow = cell.per_well[WELL_KEY];
+
+  renderMethodSummary();
+  renderHeadline(cell, wellRow, sample);
+  renderTracesPlot(cell, wellRow, sample);
+  renderPerWellPlot(cell);
+}
+
+function renderMethodSummary() {
+  const info = METHOD_INFO[FAMILY];
+  const el = $("method-summary");
+  if (!info) {
+    el.innerHTML = `<h3>${FAMILY}</h3><div class="row"><div class="k">Info</div><div class="v">(no METHOD_INFO entry — add to quant_viewer.html)</div></div>`;
+    return;
+  }
+  const rows = [
+    ["Input",           info.input],
+    ["Architecture",    info.architecture],
+    ["Training",        info.training],
+    ["TTP extraction",  info.ttp_extraction],
+  ];
+  const rowsHtml = rows.map(([k, v]) =>
+    `<div class="k">${k}</div><div class="v">${v}</div>`
+  ).join("");
+  el.innerHTML = `
+    <h3>${info.name}</h3>
+    <div class="row">${rowsHtml}</div>
+    <div class="provenance">Provenance — ${info.provenance}</div>
+  `;
+}
+
+function renderHeadline(cell, wellRow, sample) {
+  const m = cell.metrics || {};
+  $("headline").innerHTML = `
+    <div>
+      Method: <span class="method-id">${cell.method_id}</span> ·
+      well ${wellRow.well_id} ·
+      log₁₀(conc) = <span class="num">${wellRow.log10_conc}</span> ·
+      qLAMP TTP = <span class="num">${wellRow.y_true_min}</span> min ·
+      predicted well-mean TTP = <span class="num">${wellRow.y_pred_mean_min}</span> min
+      (median <span class="num">${wellRow.y_pred_median_min}</span>, std ${wellRow.y_pred_std_min})
+    </div>
+    <div style="margin-top: 4px; color: #666;">
+      Method-level metrics:
+      min pairwise AUC = <span class="num">${fmt(m.min_pairwise_auc_offdiag)}</span> ·
+      mean AUC = <span class="num">${fmt(m.mean_pairwise_auc_offdiag)}</span> ·
+      r² = <span class="num">${fmt(m.r2)}</span> ·
+      slope = <span class="num">${fmt(m.slope_min_per_decade)}</span> min/decade ·
+      compression = <span class="num">${fmt(m.prediction_range_compression)}</span> ·
+      pixel MAE = <span class="num">${fmt(m.pixel_mae_min)}</span> min
+    </div>
+  `;
+}
+
+function renderTracesPlot(cell, wellRow, sample) {
+  const t = DATA.t_axis_min;
+  const traces_data = [];
+
+  const showPerPixel = VIEW === "per_pixel" || VIEW === "both";
+  const showPerWell  = VIEW === "per_well"  || VIEW === "both";
+
+  if (showPerPixel && sample && sample.traces.length) {
+    // Grey per-pixel traces.
+    for (let i = 0; i < Math.min(sample.traces.length, 60); i++) {
+      traces_data.push({
+        x: t,
+        y: sample.traces[i],
+        mode: "lines",
+        line: { color: "rgba(120,120,120,0.25)", width: 0.9 },
+        showlegend: i === 0,
+        name: i === 0 ? "per-pixel trace" : "",
+        hoverinfo: "skip",
+      });
+    }
+  }
+
+  if (showPerWell && sample && sample.traces.length) {
+    // Well-mean trace (bold).
+    const nT = t.length;
+    const mean = new Array(nT).fill(0);
+    for (const tr of sample.traces) for (let i = 0; i < nT; i++) mean[i] += tr[i];
+    for (let i = 0; i < nT; i++) mean[i] /= sample.traces.length;
+    traces_data.push({
+      x: t,
+      y: mean,
+      mode: "lines",
+      line: { color: "#b30000", width: 2.2 },
+      name: "well-mean trace",
+    });
+  }
+
+  // Vertical: qLAMP TTP (red dashed).
+  const shapes = [
+    {
+      type: "line", x0: wellRow.y_true_min, x1: wellRow.y_true_min,
+      y0: 0, y1: 1, yref: "paper",
+      line: { color: "#b30000", width: 2, dash: "dash" },
+    },
+    // Predicted well-mean TTP (orange dashed).
+    {
+      type: "line", x0: wellRow.y_pred_mean_min, x1: wellRow.y_pred_mean_min,
+      y0: 0, y1: 1, yref: "paper",
+      line: { color: "#ff7f0e", width: 2, dash: "dash" },
+    },
+  ];
+
+  // Faint orange verticals for each pixel's predicted TTP.
+  if (showPerPixel && sample) {
+    for (const p of sample.pred_ttp_min) {
+      shapes.push({
+        type: "line", x0: p, x1: p,
+        y0: 0.9, y1: 1.0, yref: "paper",
+        line: { color: "rgba(255,127,14,0.35)", width: 1 },
+      });
+    }
+  }
+
+  const annotations = [
+    {
+      x: wellRow.y_true_min, y: 1.03, yref: "paper",
+      text: `qLAMP TTP ${wellRow.y_true_min}`, showarrow: false,
+      font: { color: "#b30000", size: 10 },
+    },
+    {
+      x: wellRow.y_pred_mean_min, y: 0.96, yref: "paper",
+      text: `predicted mean ${wellRow.y_pred_mean_min}`, showarrow: false,
+      font: { color: "#ff7f0e", size: 10 },
+    },
+  ];
+
+  Plotly.newPlot("plot_traces", traces_data, {
+    xaxis: { title: "time (min)", zeroline: false },
+    yaxis: { title: "normalised signal (spatA3)" },
+    margin: { l: 55, r: 15, t: 25, b: 45 },
+    shapes: shapes,
+    annotations: annotations,
+    hovermode: "closest",
+    showlegend: true,
+    legend: { x: 0.02, y: 0.98, bgcolor: "rgba(255,255,255,0.6)" },
+  }, { displayModeBar: false, responsive: true });
+}
+
+function renderPerWellPlot(cell) {
+  // Sort wells by log10(concentration) descending — highest conc on the left.
+  const perWell = cell.per_well;
+  const keys = Object.keys(perWell).sort((a, b) => perWell[b].log10_conc - perWell[a].log10_conc);
+
+  // X = log10(concentration).  Two overlaid lines:
+  //   red   = qLAMP TTP (per-well ground-truth calibration curve)
+  //   orange = model's well-mean predicted TTP + within-well std as error bars
+  const x = keys.map(k => perWell[k].log10_conc);
+  const y_true = keys.map(k => perWell[k].y_true_min);
+  const y_pred = keys.map(k => perWell[k].y_pred_mean_min);
+  const errs = keys.map(k => perWell[k].y_pred_std_min);
+  const wellLabels = keys.map(k => `${perWell[k].chip_id}::${perWell[k].well_id}`);
+  const marker_sizes_true = keys.map(k => k === WELL_KEY ? 14 : 9);
+  const marker_sizes_pred = keys.map(k => k === WELL_KEY ? 14 : 9);
+  const marker_edge_true  = keys.map(k => k === WELL_KEY ? "#ff7f0e" : "#b30000");
+  const marker_edge_pred  = keys.map(k => k === WELL_KEY ? "#ff7f0e" : "#e69138");
+
+  // Symmetric TTP y-range that shows both curves + gives a bit of headroom.
+  const allTTPs = y_true.concat(y_pred);
+  const minY = Math.min(...allTTPs) - 2;
+  const maxY = Math.max(...allTTPs) + 2;
+
+  Plotly.newPlot("plot_per_well", [
+    {
+      x: x, y: y_true,
+      mode: "lines+markers",
+      line: { color: "#b30000", width: 2 },
+      marker: {
+        size: marker_sizes_true,
+        color: "#b30000",
+        line: { color: marker_edge_true, width: 2 },
+      },
+      name: "qLAMP TTP (ground truth)",
+      text: wellLabels,
+      hovertemplate: "%{text}<br>log₁₀(conc)=%{x}<br>qLAMP TTP=%{y} min<extra></extra>",
+    },
+    {
+      x: x, y: y_pred,
+      mode: "lines+markers",
+      line: { color: "#ff7f0e", width: 2, dash: "dot" },
+      marker: {
+        size: marker_sizes_pred,
+        color: "#ff7f0e",
+        line: { color: marker_edge_pred, width: 2 },
+      },
+      error_y: { type: "data", array: errs, thickness: 1, width: 4, color: "rgba(255,127,14,0.5)" },
+      name: "predicted TTP (model)",
+      text: wellLabels,
+      hovertemplate: "%{text}<br>log₁₀(conc)=%{x}<br>predicted TTP=%{y} min ± std<extra></extra>",
+    },
+  ], {
+    xaxis: {
+      title: "log₁₀(starting concentration)",
+      autorange: "reversed",  // higher conc on left → clearer left-to-right decreasing TTP
+      dtick: 1,
+    },
+    yaxis: { title: "TTP (min)", range: [minY, maxY] },
+    margin: { l: 55, r: 15, t: 25, b: 45 },
+    hovermode: "closest",
+    showlegend: true,
+    legend: {
+      x: 0.02, y: 0.02,
+      bgcolor: "rgba(255,255,255,0.85)",
+      bordercolor: "#e0e0e0", borderwidth: 1,
+    },
+  }, { displayModeBar: false, responsive: true });
+}
+
+function renderSummary() {
+  const rows = DATA.scoreboard.rows;
+  const cols = [
+    "method_id",
+    "min_pairwise_auc_offdiag",
+    "mean_pairwise_auc_offdiag",
+    "min_cohens_d_adjacent",
+    "delta_c_95",
+    "snr_conc",
+    "pearson_r",
+    "r2",
+    "spearman_r",
+    "slope_min_per_decade",
+    "prediction_range_compression",
+    "pixel_mae_min",
+    "pixel_rmse_min",
+    "pixel_msd_min",
+    "mean_analytical_sensitivity",
+  ];
+  const currentMethod = currentCell().method_id;
+
+  let html = "<thead><tr>";
+  cols.forEach(c => html += `<th>${c}</th>`);
+  html += "</tr></thead><tbody>";
+
+  // Sort by min_pairwise_auc_offdiag descending.
+  const sorted = [...rows].sort((a, b) => {
+    return Number(b.min_pairwise_auc_offdiag) - Number(a.min_pairwise_auc_offdiag);
+  });
+
+  sorted.forEach((row, i) => {
+    const selected = row.method_id === currentMethod ? "selected" : (i % 2 ? "even" : "");
+    html += `<tr class="${selected}">`;
+    cols.forEach(c => {
+      const v = row[c];
+      if (c === "method_id") {
+        html += `<td class="k">${v}</td>`;
+      } else {
+        html += `<td>${fmt(v)}</td>`;
+      }
+    });
+    html += "</tr>";
+  });
+  html += "</tbody>";
+  $("summary-table").innerHTML = html;
+}
+</script>
+</body>
+</html>

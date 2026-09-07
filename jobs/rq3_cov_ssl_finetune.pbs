@@ -1,0 +1,44 @@
+#!/bin/bash
+#PBS -N p4_finetune
+#PBS -l select=1:ncpus=4:mem=32gb:ngpus=1:gpu_type=L40S
+#PBS -l walltime=03:00:00
+#PBS -J 0-71
+#PBS -j oe
+#PBS -o /rds/general/user/jh1125/home/Individual_Project/jobs/logs/
+
+set -e
+cd $PBS_O_WORKDIR
+module load Python/3.12.3-GCCcore-13.3.0
+source .venv/bin/activate
+
+# 2 obj × 3 backbones × 2 protocols × 2 downstream × 3 seeds = 72 tasks.
+# Index layout:
+#   OBJ_IDX  = IDX / 36        (0 = masked, 1 = contrastive)
+#   BB_IDX   = (IDX / 12) % 3
+#   PROT_IDX = (IDX / 6) % 2
+#   DS_IDX   = (IDX / 3) % 2
+#   SEED     = IDX % 3
+OBJS=("masked" "contrastive")
+BBS=("unet" "gru" "cnn_gru_par")
+PROTS=("frozen" "fullft")
+DSS=("fa" "fb")
+SEEDS=(0 1 2)
+
+IDX=$PBS_ARRAY_INDEX
+OBJ_IDX=$(( IDX / 36 ))
+BB_IDX=$(( (IDX / 12) % 3 ))
+PROT_IDX=$(( (IDX / 6) % 2 ))
+DS_IDX=$(( (IDX / 3) % 2 ))
+SEED_IDX=$(( IDX % 3 ))
+OBJ=${OBJS[$OBJ_IDX]}
+BB=${BBS[$BB_IDX]}
+PROT=${PROTS[$PROT_IDX]}
+DS=${DSS[$DS_IDX]}
+SEED=${SEEDS[$SEED_IDX]}
+
+echo "[array $IDX] obj=$OBJ bb=$BB prot=$PROT ds=$DS seed=$SEED"
+
+python -m lacewing.quantification.methods.ssl_finetune \
+    --objective "$OBJ" --backbone "$BB" \
+    --protocol "$PROT" --downstream "$DS" \
+    --seed "$SEED" --epochs 30

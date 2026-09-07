@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Filter pipeline viewer</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    margin: 0;
+    padding: 16px;
+    background: #fafafa;
+    color: #222;
+  }
+  h1 { margin: 0 0 8px 0; font-size: 18px; }
+  h2 { font-size: 13px; margin: 4px 0; color: #444; }
+  #controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    flex-wrap: wrap;
+  }
+  #controls label { font-size: 13px; color: #444; }
+  select { font-size: 13px; padding: 4px 6px; border: 1px solid #ccc; border-radius: 4px; }
+  .row-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .panel {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 6px 8px;
+  }
+  .panel h2 {
+    font-size: 11.5px;
+    margin: 0 0 4px 0;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 3px;
+  }
+  .panel .rule {
+    font-size: 9.5px;
+    color: #555;
+    margin-bottom: 4px;
+    min-height: 40px;
+    line-height: 1.3;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    background: #f7f7f7;
+    border-left: 3px solid #ccc;
+    padding: 4px 6px;
+    border-radius: 2px;
+  }
+  .panel .rule.layerA { border-left-color: #9b59b6; }
+  .panel .rule.layerB { border-left-color: #16a085; }
+  .panel .rule.layerC { border-left-color: #d35400; }
+  .panel .rule.layerD { border-left-color: #c0392b; }
+  .panel .counts {
+    font-size: 10px;
+    color: #777;
+    margin-bottom: 4px;
+    min-height: 14px;
+  }
+  .canvas-wrap {
+    position: relative;
+  }
+  canvas {
+    display: block;
+    width: 100%;
+    background: #fafafa;
+    border: 1px solid #eee;
+    border-radius: 4px;
+  }
+  canvas.overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+    background: transparent;
+    border: 1px solid transparent;
+  }
+  #legend, #thresholds, #well-summary, #tooltip-area {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin-top: 10px;
+    font-size: 12px;
+  }
+  #legend span.dot {
+    display: inline-block;
+    width: 12px; height: 12px;
+    margin: 0 6px 0 0;
+    border-radius: 2px;
+    vertical-align: middle;
+  }
+  #legend span.label {
+    margin-right: 14px;
+  }
+  #thresholds table, #well-summary table {
+    border-collapse: collapse;
+    font-size: 11.5px;
+    margin-top: 4px;
+  }
+  #thresholds td, #well-summary td,
+  #thresholds th, #well-summary th {
+    border: 1px solid #eee;
+    padding: 3px 8px;
+    text-align: right;
+  }
+  #thresholds th, #well-summary th {
+    background: #f5f5f5;
+    text-align: left;
+  }
+  .meta { color: #666; font-size: 12px; }
+  #tooltip-area {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    min-height: 60px;
+  }
+  .tip-label { color: #888; }
+  .tip-drop  { color: #b30000; font-weight: 600; }
+  .tip-kept  { color: #2c662d; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<h1>NTC-referenced four-layer filter — viewer</h1>
+<div class="meta" id="meta">loading manifest...</div>
+
+<div id="controls">
+  <label>Chip: <select id="chipSel"></select></label>
+  <label>Well: <select id="wellSel"></select></label>
+  <label>Layer D strategy: <select id="stratSel"></select></label>
+  <label>
+    Trace alpha kept:
+    <input id="alphaKept" type="range" min="0.05" max="1" step="0.05" value="0.35">
+  </label>
+  <label>
+    Trace alpha dropped:
+    <input id="alphaDropped" type="range" min="0.02" max="1" step="0.02" value="0.7">
+  </label>
+</div>
+
+<div id="legend">
+  <strong>Colour code</strong>:
+  <span class="label"><span class="dot" style="background:#888"></span>kept (passes all layers)</span>
+  <span class="label"><span class="dot" style="background:#9b59b6"></span>dropped by Layer A (amplitude)</span>
+  <span class="label"><span class="dot" style="background:#16a085"></span>dropped by Layer B (shape)</span>
+  <span class="label"><span class="dot" style="background:#d35400"></span>dropped by Layer C (kNN bad-neighbour)</span>
+  <span class="label"><span class="dot" style="background:#c0392b"></span>dropped by Layer D (selected metric)</span>
+</div>
+
+<!-- Row 1: trace overlays -->
+<div class="row-grid">
+  <div class="panel">
+    <h2>Step 0: raw input</h2>
+    <div class="rule" id="rule-0"></div>
+    <div class="counts" id="counts-tr-0"></div>
+    <div class="canvas-wrap"><canvas id="cv-tr-step0"></canvas><canvas id="cv-tr-step0-ov" class="overlay"></canvas></div>
+  </div>
+  <div class="panel">
+    <h2>After Layer A: amplitude</h2>
+    <div class="rule layerA" id="rule-A"></div>
+    <div class="counts" id="counts-tr-1"></div>
+    <div class="canvas-wrap"><canvas id="cv-tr-step1"></canvas><canvas id="cv-tr-step1-ov" class="overlay"></canvas></div>
+  </div>
+  <div class="panel">
+    <h2>After Layer B: shape</h2>
+    <div class="rule layerB" id="rule-B"></div>
+    <div class="counts" id="counts-tr-2"></div>
+    <div class="canvas-wrap"><canvas id="cv-tr-step2"></canvas><canvas id="cv-tr-step2-ov" class="overlay"></canvas></div>
+  </div>
+  <div class="panel">
+    <h2>After Layer C: kNN bad-neighbour</h2>
+    <div class="rule layerC" id="rule-C"></div>
+    <div class="counts" id="counts-tr-3"></div>
+    <div class="canvas-wrap"><canvas id="cv-tr-step3"></canvas><canvas id="cv-tr-step3-ov" class="overlay"></canvas></div>
+  </div>
+  <div class="panel">
+    <h2>After Layer D: <span id="layer-d-title">disagreement</span></h2>
+    <div class="rule layerD" id="rule-D"></div>
+    <div class="counts" id="counts-tr-4"></div>
+    <div class="canvas-wrap"><canvas id="cv-tr-step4"></canvas><canvas id="cv-tr-step4-ov" class="overlay"></canvas></div>
+  </div>
+  <div class="panel">
+    <h2>Final: kept only</h2>
+    <div class="rule" id="rule-F">Pixels that passed A, B, C and the selected D strategy.</div>
+    <div class="counts" id="counts-tr-5"></div>
+    <div class="canvas-wrap"><canvas id="cv-tr-step5"></canvas><canvas id="cv-tr-step5-ov" class="overlay"></canvas></div>
+  </div>
+</div>
+
+<!-- Row 2: spatial heatmaps -->
+<div class="row-grid">
+  <div class="panel"><h2>Spatial: raw</h2><div class="counts" id="counts-sp-0"></div><div class="canvas-wrap"><canvas id="cv-sp-step0"></canvas><canvas id="cv-sp-step0-ov" class="overlay"></canvas></div></div>
+  <div class="panel"><h2>Spatial: after A</h2><div class="counts" id="counts-sp-1"></div><div class="canvas-wrap"><canvas id="cv-sp-step1"></canvas><canvas id="cv-sp-step1-ov" class="overlay"></canvas></div></div>
+  <div class="panel"><h2>Spatial: after B</h2><div class="counts" id="counts-sp-2"></div><div class="canvas-wrap"><canvas id="cv-sp-step2"></canvas><canvas id="cv-sp-step2-ov" class="overlay"></canvas></div></div>
+  <div class="panel"><h2>Spatial: after C</h2><div class="counts" id="counts-sp-3"></div><div class="canvas-wrap"><canvas id="cv-sp-step3"></canvas><canvas id="cv-sp-step3-ov" class="overlay"></canvas></div></div>
+  <div class="panel"><h2>Spatial: after D</h2><div class="counts" id="counts-sp-4"></div><div class="canvas-wrap"><canvas id="cv-sp-step4"></canvas><canvas id="cv-sp-step4-ov" class="overlay"></canvas></div></div>
+  <div class="panel"><h2>Spatial: final</h2><div class="counts" id="counts-sp-5"></div><div class="canvas-wrap"><canvas id="cv-sp-step5"></canvas><canvas id="cv-sp-step5-ov" class="overlay"></canvas></div></div>
+</div>
+
+<div id="tooltip-area">
+  <span class="tip-label">Hover any trace or spatial pixel to inspect (highlights link across all panels):</span>
+  <div id="tooltip-body" style="margin-top:4px">(no pixel selected)</div>
+</div>
+
+<div id="thresholds">
+  <strong>Per-chip thresholds (from this chip's NTC well) and layer parameters</strong>
+  <div id="thresh-table"></div>
+</div>
+
+<div id="well-summary">
+  <strong>Per-well filter outcome (with selected Layer D strategy)</strong>
+  <div id="well-table"></div>
+</div>
+
+<script>
+const LAYER_COLOUR = {
+  A:    "#9b59b6",
+  B:    "#16a085",
+  C:    "#d35400",
+  D:    "#c0392b",
+  kept: "#888888",
+};
+
+const CANVAS_W = 260, CANVAS_H_TRACE = 190, CANVAS_H_SPATIAL = 190;
+
+let manifest = null;
+let chipData = null;
+let pickedPixel = null;
+let selectedStrategy = null;
+
+const STRATEGY_LABELS = {
+  mean:   "L2 to neighbour mean trace",
+  median: "L2 to neighbour median trace",
+  kth:    "L2 to kth-nearest neighbour trace",
+};
+
+function fmt(x, n = 4) {
+  if (x === null || x === undefined) return "-";
+  if (typeof x !== "number" || !isFinite(x)) return String(x);
+  return x.toFixed(n);
+}
+
+// --------------------------------------------------------------------
+// Per-pixel computed drop label given the selected D strategy
+// --------------------------------------------------------------------
+
+function pixelDropLayer(p) {
+  if (p.layer_ab === "A") return "A";
+  if (p.layer_ab === "B") return "B";
+  if (p.c_dropped)        return "C";
+  if (p.d_dropped && p.d_dropped[selectedStrategy]) return "D";
+  return null;
+}
+
+// --------------------------------------------------------------------
+// Manifest + chip load
+// --------------------------------------------------------------------
+
+async function loadManifest() {
+  const r = await fetch("filter_data/manifest.json");
+  manifest = await r.json();
+  document.getElementById("meta").textContent =
+    `pct_amp=${manifest.pct_amp}, pct_shape=${manifest.pct_shape}, ` +
+    `Layer C: k=${manifest.layer_c_params.k}, min_bad_frac=${manifest.layer_c_params.min_bad_frac}; ` +
+    `Layer D: k=${manifest.layer_d_params.k}, pct=${manifest.layer_d_params.pct}; ` +
+    `runs=${manifest.n_runs_used}`;
+
+  const chipSel = document.getElementById("chipSel");
+  chipSel.innerHTML = "";
+  manifest.chips.forEach((c) => {
+    const o = document.createElement("option");
+    o.value = c.json;
+    o.textContent = c.chip;
+    chipSel.appendChild(o);
+  });
+
+  const stratSel = document.getElementById("stratSel");
+  stratSel.innerHTML = "";
+  manifest.d_strategies.forEach((s) => {
+    const o = document.createElement("option");
+    o.value = s;
+    o.textContent = STRATEGY_LABELS[s] || s;
+    stratSel.appendChild(o);
+  });
+  selectedStrategy = manifest.d_strategies[0];
+
+  chipSel.onchange = () => loadChip(chipSel.value);
+  document.getElementById("wellSel").onchange = redraw;
+  document.getElementById("alphaKept").oninput = redraw;
+  document.getElementById("alphaDropped").oninput = redraw;
+  stratSel.onchange = () => {
+    selectedStrategy = stratSel.value;
+    renderTooltip();
+    renderWellSummary();
+    redraw();
+  };
+  loadChip(chipSel.value);
+}
+
+async function loadChip(jsonName) {
+  const r = await fetch("filter_data/" + jsonName);
+  chipData = await r.json();
+  populateWells();
+  renderThresholds();
+  renderWellSummary();
+  pickedPixel = null;
+  renderTooltip();
+  redraw();
+}
+
+function populateWells() {
+  const wellSel = document.getElementById("wellSel");
+  wellSel.innerHTML = "";
+  Object.keys(chipData.wells).sort((a, b) => +a - +b).forEach(w => {
+    const o = document.createElement("option");
+    o.value = w;
+    const lab = chipData.wells[w].label;
+    o.textContent = `well ${w} (label ${lab}, n=${chipData.wells[w].n_total})`;
+    wellSel.appendChild(o);
+  });
+}
+
+function renderThresholds() {
+  const t = chipData.thresholds;
+  const cp = manifest.layer_c_params;
+  const dp = manifest.layer_d_params;
+  const cThr = Math.ceil(cp.min_bad_frac * cp.k);
+  const html = `
+    <table>
+      <tr>
+        <th>statistic</th><th>NTC median</th><th>NTC MAD</th>
+        <th>threshold (5th pct)</th><th>direction</th>
+      </tr>
+      <tr><td>dyn_range (Layer A)</td><td>${fmt(t.dyn_range_ntc_median)}</td><td>${fmt(t.dyn_range_ntc_mad)}</td><td>${fmt(t.dyn_range_threshold)}</td><td>drop if dyn_range &lt; threshold</td></tr>
+      <tr><td>net_slope (Layer B-a)</td><td>${fmt(t.net_slope_ntc_median)}</td><td>${fmt(t.net_slope_ntc_mad)}</td><td>${fmt(t.net_slope_threshold)}</td><td>drop if net_slope &lt; threshold</td></tr>
+      <tr><td>trace_min (Layer B-b)</td><td>${fmt(t.trace_min_ntc_median)}</td><td>${fmt(t.trace_min_ntc_mad)}</td><td>${fmt(t.trace_min_threshold)}</td><td>drop if trace_min &lt; threshold</td></tr>
+    </table>
+    <div class="meta" style="margin-top:4px">
+      NTC well = ${t.n_ntc_pixels} pixels.<br>
+      <b>Layer C:</b> drop pixel if &ge; ${cThr}/${cp.k} of its nearest spatial neighbours (same well) were dropped by A or B.<br>
+      <b>Layer D:</b> for each surviving pixel (post A+B+C), compute disagreement using the selected metric over k=${dp.k} neighbours, then drop pixels above the per-well ${dp.pct}-th percentile.
+    </div>
+  `;
+  document.getElementById("thresh-table").innerHTML = html;
+}
+
+function renderWellSummary() {
+  const rows = chipData.summary
+    .sort((a, b) => a.well - b.well)
+    .map(r => {
+      const nD = r.n_layerD_dropped_per_strategy[selectedStrategy];
+      const after_D = r.n_after_C - nD;
+      return `<tr>
+        <td>${r.well}</td><td>${r.label}</td><td>${r.n_total}</td>
+        <td>${r.n_layerA_dropped}</td><td>${r.n_after_A}</td>
+        <td>${r.n_layerB_dropped}</td><td>${r.n_after_B}</td>
+        <td>${r.n_layerC_dropped}</td><td>${r.n_after_C}</td>
+        <td>${nD}</td><td>${after_D}</td>
+      </tr>`;
+    }).join("");
+  document.getElementById("well-table").innerHTML = `
+    <table>
+      <tr><th>well</th><th>label</th><th>n</th>
+          <th>A drops</th><th>after A</th>
+          <th>B drops</th><th>after B</th>
+          <th>C drops</th><th>after C</th>
+          <th>D drops (${selectedStrategy})</th><th>final</th></tr>
+      ${rows}
+    </table>
+  `;
+}
+
+function currentWell() {
+  const w = document.getElementById("wellSel").value;
+  return chipData.wells[w];
+}
+
+// --------------------------------------------------------------------
+// Per-step rule annotations
+// --------------------------------------------------------------------
+
+function renderRules() {
+  const t = chipData.thresholds;
+  const cp = manifest.layer_c_params;
+  const dp = manifest.layer_d_params;
+  document.getElementById("rule-0").textContent =
+    "All pixels in the selected well, raw post-titan trace " +
+    "(baseline anchored to 0 at sample 0; voltage units).";
+  document.getElementById("rule-A").innerHTML =
+    "<strong>Rule:</strong> drop pixel if dyn_range &lt; " +
+    fmt(t.dyn_range_threshold) + " V<br>" +
+    "<strong>= 5th pct of NTC pixel dyn_range</strong>.";
+  document.getElementById("rule-B").innerHTML =
+    "<strong>Rule:</strong> drop pixel if net_slope &lt; " +
+    fmt(t.net_slope_threshold) + " V " +
+    "<em>OR</em> trace_min &lt; " + fmt(t.trace_min_threshold) + " V<br>" +
+    "<strong>= 5th pct of NTC pixel slope/min</strong>.";
+  const cThr = Math.ceil(cp.min_bad_frac * cp.k);
+  document.getElementById("rule-C").innerHTML =
+    `<strong>Rule:</strong> count how many of each pixel's ${cp.k} ` +
+    `nearest neighbours were dropped by A/B. Drop pixel if &ge; ` +
+    `${cThr}/${cp.k} neighbours are bad.`;
+
+  document.getElementById("layer-d-title").textContent =
+    STRATEGY_LABELS[selectedStrategy] || selectedStrategy;
+  let dText = "";
+  if (selectedStrategy === "mean") {
+    dText = `<strong>Rule:</strong> for each pixel, L2 distance from ` +
+      `its trace to the <em>mean</em> trace of its ${dp.k} nearest ` +
+      `neighbours. Drop pixels above per-well ${dp.pct}-th percentile.`;
+  } else if (selectedStrategy === "median") {
+    dText = `<strong>Rule:</strong> for each pixel, L2 distance from ` +
+      `its trace to the <em>elementwise median</em> of its ${dp.k} ` +
+      `nearest neighbours' traces. Robust to a single outlier neighbour. ` +
+      `Drop pixels above per-well ${dp.pct}-th percentile.`;
+  } else if (selectedStrategy === "kth") {
+    dText = `<strong>Rule:</strong> for each pixel, L2 distance from ` +
+      `its trace to the trace of its <em>${dp.k}-th nearest</em> ` +
+      `(= farthest) spatial neighbour. LOF-style k-distance. ` +
+      `Drop pixels above per-well ${dp.pct}-th percentile.`;
+  }
+  document.getElementById("rule-D").innerHTML = dText;
+}
+
+// --------------------------------------------------------------------
+// Trace overlay panel
+// --------------------------------------------------------------------
+
+function computeBounds(pixels) {
+  let ymin =  Infinity, ymax = -Infinity, T = 0;
+  for (const p of pixels) {
+    if (p.trace.length > T) T = p.trace.length;
+    for (const v of p.trace) {
+      if (v < ymin) ymin = v;
+      if (v > ymax) ymax = v;
+    }
+  }
+  if (!isFinite(ymin)) { ymin = -0.1; ymax = 0.1; }
+  if (ymax - ymin < 1e-9) ymax = ymin + 1e-3;
+  return { ymin, ymax, T };
+}
+
+function setCanvasSize(cv, h) {
+  cv.width  = CANVAS_W * window.devicePixelRatio;
+  cv.height = h * window.devicePixelRatio;
+  cv.style.height = h + "px";
+  const ctx = cv.getContext("2d");
+  ctx.setTransform(window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0);
+  const ov = document.getElementById(cv.id + "-ov");
+  if (ov) {
+    ov.width = cv.width; ov.height = cv.height;
+    ov.style.height = cv.style.height;
+    ov.style.width = cv.style.width || "100%";
+    const octx = ov.getContext("2d");
+    octx.setTransform(window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0);
+    octx.clearRect(0, 0, CANVAS_W, h);
+  }
+  return ctx;
+}
+
+function drawTraceAxes(ctx, ymin, ymax) {
+  const padL = 28, padR = 4, padT = 6, padB = 18;
+  const W = CANVAS_W, H = CANVAS_H_TRACE;
+  ctx.clearRect(0, 0, W, H);
+  ctx.strokeStyle = "#bbb";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(padL, padT);  ctx.lineTo(padL, H - padB);
+  ctx.lineTo(W - padR, H - padB);
+  ctx.stroke();
+  if (ymin < 0 && ymax > 0) {
+    const y0 = padT + (ymax - 0) / (ymax - ymin) * (H - padT - padB);
+    ctx.strokeStyle = "#e0e0e0";
+    ctx.beginPath();
+    ctx.moveTo(padL, y0); ctx.lineTo(W - padR, y0);
+    ctx.stroke();
+  }
+  ctx.fillStyle = "#777";
+  ctx.font = "9px sans-serif";
+  ctx.fillText(ymax.toFixed(3), 2, padT + 4);
+  ctx.fillText(ymin.toFixed(3), 2, H - padB);
+  return { padL, padR, padT, padB, W, H };
+}
+
+function pixelVisible(p, mode) {
+  const dl = pixelDropLayer(p);
+  if (mode === "raw")    return "kept";
+  if (mode === "afterA") return (dl === "A") ? "dropped" : "kept";
+  if (mode === "afterB") return (dl === "A" || dl === "B") ? "dropped" : "kept";
+  if (mode === "afterC") return (dl === "A" || dl === "B" || dl === "C") ? "dropped" : "kept";
+  if (mode === "afterD") return dl ? "dropped" : "kept";
+  if (mode === "final")  return dl ? "hidden" : "kept";
+  return "kept";
+}
+
+function colourForPixel(p, mode) {
+  const v = pixelVisible(p, mode);
+  if (v === "hidden") return null;
+  if (v === "dropped") {
+    const dl = pixelDropLayer(p);
+    return LAYER_COLOUR[dl] || "#999";
+  }
+  return LAYER_COLOUR.kept;
+}
+
+function drawTracePanel(cvId, pixels, mode, alphaKept, alphaDropped) {
+  const cv = document.getElementById(cvId);
+  const ctx = setCanvasSize(cv, CANVAS_H_TRACE);
+  const { ymin, ymax, T } = computeBounds(pixels);
+  const bounds = drawTraceAxes(ctx, ymin, ymax);
+  const { padL, padR, padT, padB, W, H } = bounds;
+  const xScale = (W - padL - padR) / Math.max(T - 1, 1);
+  const yScale = (H - padT - padB) / Math.max(ymax - ymin, 1e-9);
+
+  const drawList = [];
+  for (const p of pixels) {
+    const v = pixelVisible(p, mode);
+    if (v === "hidden") continue;
+    drawList.push([p, v]);
+  }
+  drawList.sort((a, b) =>
+    (a[1] === "kept" ? -1 : 1) - (b[1] === "kept" ? -1 : 1));
+
+  for (const [p, v] of drawList) {
+    const colour = colourForPixel(p, mode);
+    const alpha  = (v === "kept") ? alphaKept : alphaDropped;
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = colour;
+    ctx.lineWidth = (v === "kept") ? 0.7 : 1.1;
+    ctx.beginPath();
+    for (let i = 0; i < p.trace.length; i++) {
+      const x = padL + i * xScale;
+      const y = padT + (ymax - p.trace[i]) * yScale;
+      if (i === 0) ctx.moveTo(x, y);
+      else         ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+
+  cv._hitData = { pixels, mode, bounds, ymin, ymax, T, xScale, yScale };
+}
+
+// --------------------------------------------------------------------
+// Spatial heatmap panel
+// --------------------------------------------------------------------
+
+function drawSpatialPanel(cvId, pixels, mode, well) {
+  const cv = document.getElementById(cvId);
+  const ctx = setCanvasSize(cv, CANVAS_H_SPATIAL);
+  const W = CANVAS_W, H = CANVAS_H_SPATIAL;
+  const pad = 4;
+  ctx.clearRect(0, 0, W, H);
+  ctx.strokeStyle = "#bbb";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(pad, pad, W - 2*pad, H - 2*pad);
+
+  const nrows = well.nrows || 1;
+  const ncols = well.ncols || 1;
+  const cellW = (W - 2*pad) / ncols;
+  const cellH = (H - 2*pad) / nrows;
+  const size = Math.max(1.5, Math.min(cellW, cellH));
+
+  const cells = [];
+  for (const p of pixels) {
+    const v = pixelVisible(p, mode);
+    if (v === "hidden") continue;
+    const colour = colourForPixel(p, mode);
+    if (!colour) continue;
+    const x = pad + p.col * cellW;
+    const y = pad + p.row * cellH;
+    ctx.fillStyle = colour;
+    ctx.fillRect(x, y, size, size);
+    cells.push({ p, x, y, size });
+  }
+
+  ctx.fillStyle = "#777";
+  ctx.font = "8.5px sans-serif";
+  ctx.fillText(`${nrows}x${ncols}`, pad + 2, H - pad - 2);
+
+  cv._hitData = { cells, kind: "spatial" };
+}
+
+// --------------------------------------------------------------------
+// Counts
+// --------------------------------------------------------------------
+
+function countByMode(pixels, mode) {
+  let kept = 0, dropped = 0;
+  for (const p of pixels) {
+    const v = pixelVisible(p, mode);
+    if (v === "kept") kept++;
+    else if (v === "dropped" || v === "hidden") dropped++;
+  }
+  return { kept, dropped, total: kept + dropped };
+}
+
+function updateCounts(idTrace, idSpatial, pixels, mode) {
+  const c = countByMode(pixels, mode);
+  const t = (mode === "raw")
+    ? `kept ${c.kept}`
+    : `kept ${c.kept}, dropped ${c.dropped}`;
+  document.getElementById(idTrace).textContent = t;
+  document.getElementById(idSpatial).textContent = t;
+}
+
+// --------------------------------------------------------------------
+// Hover tooltip
+// --------------------------------------------------------------------
+
+function explainPixel(p) {
+  const t = chipData.thresholds;
+  const cp = manifest.layer_c_params;
+  const dp = manifest.layer_d_params;
+  const dl = pixelDropLayer(p);
+  const lines = [];
+  lines.push(`pid=${p.pid}, row=${p.row}, col=${p.col}, n_wrong=${p.n_wrong}, status=${p.status}`);
+  lines.push(`dyn_range  = ${fmt(p.dyn_range)} V   (Layer A threshold = ${fmt(t.dyn_range_threshold)})`);
+  lines.push(`net_slope  = ${fmt(p.net_slope)} V   (Layer B-a threshold = ${fmt(t.net_slope_threshold)})`);
+  lines.push(`trace_min  = ${fmt(p.trace_min)} V   (Layer B-b threshold = ${fmt(t.trace_min_threshold)})`);
+  const cScore = (p.c_score === null || p.c_score === undefined) ? "-" : p.c_score;
+  lines.push(`Layer C bad-neighbour count = ${cScore} / ${cp.k}   (threshold = ${Math.ceil(cp.min_bad_frac * cp.k)})`);
+  const ds = p.d_scores || {};
+  lines.push(`Layer D scores: mean=${fmt(ds.mean, 3)}, median=${fmt(ds.median, 3)}, kth=${fmt(ds.kth, 3)}`);
+
+  let verdict;
+  if (dl === "A") {
+    verdict = `<span class="tip-drop">dropped by Layer A</span>: ` +
+      `dyn_range (${fmt(p.dyn_range)}) < threshold (${fmt(t.dyn_range_threshold)}).`;
+  } else if (dl === "B") {
+    const reasons = [];
+    if (p.net_slope < t.net_slope_threshold) {
+      reasons.push(`net_slope (${fmt(p.net_slope)}) < ${fmt(t.net_slope_threshold)}`);
+    }
+    if (p.trace_min < t.trace_min_threshold) {
+      reasons.push(`trace_min (${fmt(p.trace_min)}) < ${fmt(t.trace_min_threshold)}`);
+    }
+    verdict = `<span class="tip-drop">dropped by Layer B</span>: ` +
+      reasons.join(" AND/OR ") + ".";
+  } else if (dl === "C") {
+    const thr = Math.ceil(cp.min_bad_frac * cp.k);
+    verdict = `<span class="tip-drop">dropped by Layer C</span>: ` +
+      `${cScore}/${cp.k} neighbours dropped by A/B (threshold = ${thr}).`;
+  } else if (dl === "D") {
+    const s = ds[selectedStrategy];
+    verdict = `<span class="tip-drop">dropped by Layer D (${selectedStrategy})</span>: ` +
+      `disagreement score ${fmt(s, 3)} > well's ${dp.pct}-th percentile cutoff.`;
+  } else {
+    verdict = `<span class="tip-kept">kept</span>: passes all four layers.`;
+  }
+
+  return verdict + "<br>" + lines.join("<br>");
+}
+
+function renderTooltip() {
+  const body = document.getElementById("tooltip-body");
+  if (!pickedPixel) { body.textContent = "(no pixel selected)"; return; }
+  body.innerHTML = explainPixel(pickedPixel);
+}
+
+function nearestTracePixel(cv, mx, my) {
+  const hd = cv._hitData;
+  if (!hd || hd.kind === "spatial") return null;
+  const { pixels, mode, bounds, ymin, ymax, T, xScale, yScale } = hd;
+  const { padL, padT } = bounds;
+  const sampleIdx = Math.min(T - 1,
+    Math.max(0, Math.round((mx - padL) / xScale)));
+  let best = null, bestD = Infinity;
+  for (const p of pixels) {
+    if (pixelVisible(p, mode) === "hidden") continue;
+    if (sampleIdx >= p.trace.length) continue;
+    const y = padT + (ymax - p.trace[sampleIdx]) * yScale;
+    const d = Math.abs(y - my);
+    if (d < bestD) { bestD = d; best = p; }
+  }
+  return best;
+}
+
+function nearestSpatialPixel(cv, mx, my) {
+  const hd = cv._hitData;
+  if (!hd || hd.kind !== "spatial") return null;
+  let best = null, bestD = Infinity;
+  for (const cell of hd.cells) {
+    const cx = cell.x + cell.size / 2;
+    const cy = cell.y + cell.size / 2;
+    const d = (cx - mx) * (cx - mx) + (cy - my) * (cy - my);
+    if (d < bestD) { bestD = d; best = cell.p; }
+  }
+  return best;
+}
+
+function installHover() {
+  const allCanvases = document.querySelectorAll("canvas:not(.overlay)");
+  allCanvases.forEach(cv => {
+    cv.onmousemove = (e) => {
+      const rect = cv.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const p = cv.id.startsWith("cv-sp")
+        ? nearestSpatialPixel(cv, mx, my)
+        : nearestTracePixel(cv, mx, my);
+      if (p) {
+        pickedPixel = p;
+        renderTooltip();
+        drawAllOverlays(pickedPixel);
+      }
+    };
+  });
+}
+
+// --------------------------------------------------------------------
+// Hover-link overlay drawing
+// --------------------------------------------------------------------
+
+function drawTraceOverlay(cvId, picked) {
+  const ov = document.getElementById(cvId + "-ov");
+  if (!ov) return;
+  const ctx = ov.getContext("2d");
+  ctx.clearRect(0, 0, CANVAS_W, CANVAS_H_TRACE);
+  if (!picked) return;
+  const base = document.getElementById(cvId);
+  const hd = base._hitData;
+  if (!hd || hd.kind === "spatial") return;
+  const { pixels, mode, bounds, ymin, ymax, T, xScale, yScale } = hd;
+  const { padL, padT } = bounds;
+  const target = pixels.find(p => p.pid === picked.pid &&
+                                  p.row === picked.row &&
+                                  p.col === picked.col);
+  if (!target) return;
+  if (pixelVisible(target, mode) === "hidden") return;
+  ctx.strokeStyle = "#000";
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  for (let i = 0; i < target.trace.length; i++) {
+    const x = padL + i * xScale;
+    const y = padT + (ymax - target.trace[i]) * yScale;
+    if (i === 0) ctx.moveTo(x, y);
+    else         ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+}
+
+function drawSpatialOverlay(cvId, picked) {
+  const ov = document.getElementById(cvId + "-ov");
+  if (!ov) return;
+  const ctx = ov.getContext("2d");
+  ctx.clearRect(0, 0, CANVAS_W, CANVAS_H_SPATIAL);
+  if (!picked) return;
+  const base = document.getElementById(cvId);
+  const hd = base._hitData;
+  if (!hd || hd.kind !== "spatial") return;
+  const cell = hd.cells.find(c => c.p.pid === picked.pid &&
+                                  c.p.row === picked.row &&
+                                  c.p.col === picked.col);
+  if (!cell) return;
+  ctx.strokeStyle = "#000";
+  ctx.lineWidth = 1.5;
+  const pad = 1;
+  ctx.strokeRect(cell.x - pad, cell.y - pad,
+                 cell.size + 2 * pad, cell.size + 2 * pad);
+}
+
+function drawAllOverlays(picked) {
+  for (const step of STEPS) {
+    drawTraceOverlay(step.tr, picked);
+    drawSpatialOverlay(step.sp, picked);
+  }
+}
+
+// --------------------------------------------------------------------
+// Top-level redraw
+// --------------------------------------------------------------------
+
+const STEPS = [
+  { mode: "raw",    tr: "cv-tr-step0", sp: "cv-sp-step0", ct: 0 },
+  { mode: "afterA", tr: "cv-tr-step1", sp: "cv-sp-step1", ct: 1 },
+  { mode: "afterB", tr: "cv-tr-step2", sp: "cv-sp-step2", ct: 2 },
+  { mode: "afterC", tr: "cv-tr-step3", sp: "cv-sp-step3", ct: 3 },
+  { mode: "afterD", tr: "cv-tr-step4", sp: "cv-sp-step4", ct: 4 },
+  { mode: "final",  tr: "cv-tr-step5", sp: "cv-sp-step5", ct: 5 },
+];
+
+function redraw() {
+  if (!chipData) return;
+  renderRules();
+  const well = currentWell();
+  const pixels = well.pixels;
+  const ak = +document.getElementById("alphaKept").value;
+  const ad = +document.getElementById("alphaDropped").value;
+  for (const step of STEPS) {
+    drawTracePanel(step.tr, pixels, step.mode, ak, ad);
+    drawSpatialPanel(step.sp, pixels, step.mode, well);
+    updateCounts(`counts-tr-${step.ct}`, `counts-sp-${step.ct}`, pixels, step.mode);
+  }
+  installHover();
+  if (pickedPixel) drawAllOverlays(pickedPixel);
+}
+
+loadManifest();
+</script>
+
+</body>
+</html>

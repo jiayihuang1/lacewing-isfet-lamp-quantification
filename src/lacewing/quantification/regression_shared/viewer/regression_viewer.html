@@ -1,0 +1,595 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Regression Results Viewer</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    margin: 0; padding: 14px; background: #fafafa; color: #222;
+  }
+  h1 { font-size: 18px; margin: 0 0 10px 0; }
+  h2 { font-size: 14px; margin: 14px 0 6px 0; }
+  .status { font-size: 12px; color: #888; margin-left: 8px; }
+  .panel {
+    display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end;
+    padding: 10px 12px; background: #fff; border: 1px solid #e0e0e0;
+    border-radius: 8px; margin-bottom: 12px;
+  }
+  .field { display: flex; flex-direction: column; min-width: 200px; }
+  .field label { font-size: 11px; color: #666; margin-bottom: 4px; }
+  select { font-size: 13px; padding: 6px 8px; border: 1px solid #c8c8c8;
+           border-radius: 6px; background: #fff; color: #222; }
+  option { background: #fff; color: #222; }
+
+  .headline {
+    background: #fff; border: 1px solid #e0e0e0; border-radius: 8px;
+    padding: 10px 14px; margin-bottom: 12px;
+    font-size: 13px; line-height: 1.5;
+  }
+  .headline .num { font-weight: 600; color: #1f3a6b; }
+  .headline .delta-good { color: #2ca02c; font-weight: 600; }
+  .headline .delta-bad  { color: #b30000; font-weight: 600; }
+
+  .grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+    margin-bottom: 12px;
+  }
+  .plot-card {
+    background: #fff; border: 1px solid #e0e0e0; border-radius: 8px;
+    padding: 6px 8px;
+  }
+  .plot-card h3 {
+    font-size: 12.5px; margin: 4px 6px 2px; color: #444; font-weight: 600;
+  }
+  .plot-card .note {
+    font-size: 10.5px; color: #888; margin: 0 6px 4px; line-height: 1.4;
+  }
+  .plot { width: 100%; height: 320px; }
+  table.tbl {
+    border-collapse: collapse; width: 100%; font-size: 11.5px;
+  }
+  table.tbl th, table.tbl td { padding: 4px 8px; text-align: right; }
+  table.tbl th { background: #f1f5fb; text-align: left; color: #1f3a6b; }
+  table.tbl td.k { text-align: left; }
+  table.tbl tr.even { background: #fafbfd; }
+
+  .obs {
+    background: #f3f7fb; border: 1px solid #d8e3f0;
+    border-radius: 8px; padding: 10px 14px;
+    font-size: 12.5px; line-height: 1.55; color: #1f3a6b;
+    margin-bottom: 14px;
+  }
+  .obs ul { margin: 6px 0 0 18px; padding: 0; }
+  .obs li { margin: 4px 0; }
+
+  @media (max-width: 1100px) {
+    .grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 700px) {
+    .grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Regression Results Viewer
+  <span class="status" id="status">loading …</span>
+</h1>
+
+<div class="obs" id="global-obs">
+  <b>What you're looking at.</b>  Per-pixel TTP regression on the locked
+  MAD k=1.5 ABCD ntcRaw preprocessing.  Training set = the 5
+  dose-response chips (1e5–1e9), wells 0–3 only, every pixel inheriting
+  its chip's qLAMP mean TTP.  Test set = the SD multiplex chip's 5
+  dilution wells.
+  <ul>
+    <li><b>5 distinct training labels</b>, so the constant-mean baseline
+        MAE is the bar to beat (≈3.84 min — printed below per cell).</li>
+    <li>Per-pixel predictions and the well-mean of those predictions are
+        both shown.  Per-well MAE is usually better than per-pixel MAE
+        because intra-well noise averages out.</li>
+    <li>Curves are downsampled by 4× for transport (every 4th sample of
+        the 450-step trace).  Time axis in minutes.</li>
+  </ul>
+  <b>Three R²-style numbers — read carefully.</b>
+  <ul>
+    <li><b>pixel R²</b> = standard R² (1 − SS_res/SS_tot) computed across
+        all ~5000 test pixels with their per-pixel labels (5 distinct
+        values, repeated per well).  Strict accuracy metric.</li>
+    <li><b>well R²</b> = standard R² across the 5 SD-test well-means
+        (predicted vs ground truth).  Strict accuracy metric, n=5.</li>
+    <li><b>well Pearson²</b> = squared Pearson correlation across the 5
+        SD-test well-means.  Measures <i>trend</i> rather than
+        magnitude.  <b>This is the metric the rule-based methods
+        report</b>: TTP (deployed baseline) = 0.976, SDM v2 = 0.988,
+        Cy0 v2 = 0.762, all computed the same way on n=5 chip-means.
+        The regression's well Pearson² is comparable to those numbers;
+        well R² is the stricter cousin (it penalises predictions that
+        track the trend but compress the range).</li>
+  </ul>
+</div>
+
+<div class="panel">
+  <div class="field">
+    <label>Model</label>
+    <select id="model"></select>
+  </div>
+  <div class="field">
+    <label>Loss</label>
+    <select id="loss"></select>
+  </div>
+  <div class="field">
+    <label>Test well</label>
+    <select id="well"></select>
+  </div>
+</div>
+
+<div class="headline" id="headline">…</div>
+
+<div class="grid">
+  <div class="plot-card">
+    <h3>1. Per-pixel traces in the selected well</h3>
+    <div class="note">Light grey lines are individual pixels (sampled).
+      The thick red line is the well-mean.  The black dotted line marks
+      the well's qLAMP-derived ground-truth TTP; the orange dotted line
+      marks the model's predicted well-mean.</div>
+    <div class="plot" id="plot_traces"></div>
+  </div>
+  <div class="plot-card">
+    <h3>2. Per-pixel predicted vs. actual</h3>
+    <div class="note">Each dot is one pixel from the selected well; x =
+      true TTP (single value per well), y = model's per-pixel prediction.
+      Mean line in orange.</div>
+    <div class="plot" id="plot_per_pixel_yhat"></div>
+  </div>
+  <div class="plot-card">
+    <h3>3. Per-well predicted vs. actual (this seed, full test set)</h3>
+    <div class="note">All 5 SD-test wells, each showing y_true vs.
+      y_pred (well-mean of per-pixel predictions).  Black line = perfect
+      prediction.  Errors annotated next to each point.  The Pearson²
+      printed below is the same metric the rule-based methods report.</div>
+    <div class="plot" id="plot_per_well"></div>
+    <div class="note" id="per_well_rule_compare" style="margin-top:6px;"></div>
+  </div>
+</div>
+
+<h2>Headline metrics across every (model, loss) cell</h2>
+<div class="plot-card" style="padding: 8px 12px;">
+  <table id="summary-table" class="tbl"></table>
+</div>
+
+<script>
+let DATA = null;
+let MODEL = null, LOSS = null, KEY = null;
+
+function $(id) { return document.getElementById(id); }
+
+function fmt(x, dp = 3) {
+  if (x == null || !isFinite(x)) return "—";
+  return Number(x).toFixed(dp);
+}
+
+// SD well -> log10(concentration).  Wells 0..4 = dilutions E,D,C,B,A
+// (matches Analysis/regression/data/labels.py: SD_WELL_LABELS + SD_LABEL_LOG).
+const SD_WELL_LOGCONC = {0: 9, 1: 8, 2: 7, 3: 6, 4: 5};
+
+// Rule-based + qLAMP r² and slope on the same SD held-out 5 wells.
+// Computed from Analysis/quantification/results/sdm_cy0_v2_smooth100_start10/per_chip.csv
+// (SD row) + qLAMP fluorometer reference matrix.  Hard-coded here so the
+// viewer doesn't need a second JSON fetch.
+const SD_RULEBASED = {
+  "qLAMP": {r2: 0.9859, slope: -3.134},
+  "TTP":   {r2: 0.9983, slope: -1.428},
+  "SDM":   {r2: 0.9988, slope: -1.438},
+  "Cy0":   {r2: 0.9974, slope: -0.958},
+};
+
+function _pearsonR2(xs, ys) {
+  const n = xs.length;
+  if (n < 2) return NaN;
+  const mx = xs.reduce((a, b) => a + b, 0) / n;
+  const my = ys.reduce((a, b) => a + b, 0) / n;
+  let sxy = 0, sxx = 0, syy = 0;
+  for (let i = 0; i < n; i++) {
+    sxy += (xs[i] - mx) * (ys[i] - my);
+    sxx += (xs[i] - mx) ** 2;
+    syy += (ys[i] - my) ** 2;
+  }
+  if (sxx === 0 || syy === 0) return NaN;
+  const r = sxy / (Math.sqrt(sxx) * Math.sqrt(syy));
+  return r * r;
+}
+
+function _olsSlope(xs, ys) {
+  // y = a*x + b ; return a.
+  const n = xs.length;
+  if (n < 2) return NaN;
+  const mx = xs.reduce((a, b) => a + b, 0) / n;
+  const my = ys.reduce((a, b) => a + b, 0) / n;
+  let num = 0, den = 0;
+  for (let i = 0; i < n; i++) {
+    num += (xs[i] - mx) * (ys[i] - my);
+    den += (xs[i] - mx) ** 2;
+  }
+  return den === 0 ? NaN : num / den;
+}
+
+// SD held-out r² + slope for one cell, computed from per_well_pred.
+// Returns {r2, slope} (both NaN if SD wells aren't in per_well_pred).
+function sdHeldOutStats(c) {
+  const pw = c && c.per_well_pred;
+  if (!pw) return {r2: NaN, slope: NaN};
+  const xs = [], ys = [];
+  for (const k of Object.keys(pw)) {
+    const w = parseInt(k.split("::")[1], 10);
+    if (SD_WELL_LOGCONC[w] != null) {
+      xs.push(SD_WELL_LOGCONC[w]);
+      ys.push(pw[k]);
+    }
+  }
+  return {r2: _pearsonR2(xs, ys), slope: _olsSlope(xs, ys)};
+}
+
+fetch("regression_viewer_data.json")
+  .then(r => r.json())
+  .then(d => {
+    DATA = d;
+    $("status").textContent = "loaded.";
+    initControls();
+    render();
+    renderSummary();
+  })
+  .catch(e => {
+    $("status").textContent = "failed to load: " + e;
+  });
+
+function initControls() {
+  const mSel = $("model");
+  DATA.models.forEach(m => {
+    const o = document.createElement("option");
+    o.value = m; o.textContent = m;
+    mSel.appendChild(o);
+  });
+  // default to cnn_transformer_seq if present
+  MODEL = DATA.models.includes("cnn_transformer_seq") ? "cnn_transformer_seq" : DATA.models[0];
+  mSel.value = MODEL;
+  mSel.addEventListener("change", e => { MODEL = e.target.value; render(); });
+
+  const lSel = $("loss");
+  DATA.losses.forEach(l => {
+    const o = document.createElement("option");
+    o.value = l; o.textContent = l;
+    lSel.appendChild(o);
+  });
+  LOSS = DATA.losses.includes("mse") ? "mse" : DATA.losses[0];
+  lSel.value = LOSS;
+  lSel.addEventListener("change", e => { LOSS = e.target.value; render(); });
+
+  const wSel = $("well");
+  DATA.unique_keys.forEach(k => {
+    const o = document.createElement("option");
+    o.value = k;
+    const t = DATA.sampled_traces[k];
+    o.textContent = `well ${t.well_id}  (y_true = ${t.y_true.toFixed(2)} min, ${t.n} pixels sampled)`;
+    wSel.appendChild(o);
+  });
+  KEY = DATA.unique_keys[0];
+  wSel.value = KEY;
+  wSel.addEventListener("change", e => { KEY = e.target.value; render(); });
+}
+
+function cellKey() { return `${MODEL}__${LOSS}`; }
+function cell() { return DATA.cells[cellKey()]; }
+
+function render() {
+  const c = cell();
+  if (!c) {
+    $("headline").innerHTML = `<span style="color:#b00">No data for ${MODEL} + ${LOSS}.</span>`;
+    return;
+  }
+  const b3 = c.best3;
+  const baselineMae = b3.baseline_constant_mean_mae;
+  const pixDelta = baselineMae - b3.pixel_mae_min;
+  const wlDelta  = baselineMae - b3.well_mae_min;
+  const sd = sdHeldOutStats(c);   // best-seed predictions on the held-out SD chip
+  $("headline").innerHTML = `
+    <b>${MODEL} · ${LOSS}</b>  ·  best-3 of ${b3.n_seeds_picked} seeds
+    (picked: ${b3.picked_seeds.join(", ")})  ·  best seed shown
+    below: <span class="num">${c.best_seed}</span>
+    <br>
+    <span class="num">Pixel MAE = ${fmt(b3.pixel_mae_min, 3)} min</span>
+    &nbsp;(vs. constant-mean baseline ${fmt(baselineMae, 3)} min,
+      <span class="${pixDelta > 0 ? 'delta-good' : 'delta-bad'}">
+        ${pixDelta > 0 ? '−' : '+'}${fmt(Math.abs(pixDelta), 3)} min</span>)
+    &nbsp;·&nbsp;
+    <span class="num">Pixel R² = ${fmt(b3.pixel_r2, 3)}</span>
+    &nbsp;·&nbsp;
+    <span class="num">Well MAE = ${fmt(b3.well_mae_min, 3)} min</span>
+    (<span class="${wlDelta > 0 ? 'delta-good' : 'delta-bad'}">
+      ${wlDelta > 0 ? '−' : '+'}${fmt(Math.abs(wlDelta), 3)} min</span>)
+    &nbsp;·&nbsp;
+    <span class="num">Well R² = ${fmt(b3.well_r2, 3)}</span>
+    &nbsp;·&nbsp;
+    <span class="num" title="Pearson² between per-well predicted TTP and qLAMP TTP across 5 SD-test wells (old Week 10 metric).">
+      Well Pearson² (vs qLAMP) = ${fmt(b3.well_pearson_r2, 3)}</span>
+    <br>
+    <b>SD held-out — dose-response trend:</b>
+    <span class="num" title="Pearson² of per-well predicted TTP vs log10(target concentration) across the 5 SD dilution wells.  Same metric the rule-based reports use.">
+      r² vs log10(conc) = ${fmt(sd.r2, 4)}</span>
+    &nbsp;·&nbsp;
+    <span class="num" title="OLS slope of predicted TTP vs log10(concentration) on the SD wells.  Lower (more negative) = stronger dose-response.">
+      slope = ${fmt(sd.slope, 3)} min/decade</span>
+    &nbsp;·&nbsp;
+    <span style="color:#666; font-style:italic; font-size:11px;">
+      reference: qLAMP r²=${SD_RULEBASED.qLAMP.r2.toFixed(3)}/slope=${SD_RULEBASED.qLAMP.slope.toFixed(2)} ·
+      TTP r²=${SD_RULEBASED.TTP.r2.toFixed(3)}/slope=${SD_RULEBASED.TTP.slope.toFixed(2)} ·
+      SDM r²=${SD_RULEBASED.SDM.r2.toFixed(3)}/slope=${SD_RULEBASED.SDM.slope.toFixed(2)} ·
+      Cy0 r²=${SD_RULEBASED.Cy0.r2.toFixed(3)}/slope=${SD_RULEBASED.Cy0.slope.toFixed(2)}
+    </span>
+  `;
+
+  renderTraces();
+  renderPerPixelScatter();
+  renderPerWellScatter();
+}
+
+function renderTraces() {
+  const t = DATA.sampled_traces[KEY];
+  const c = cell();
+  const preds = c.preds_sampled[KEY] || [];
+  const t_axis = DATA.t_axis_min;
+
+  // grey individual traces
+  const traces = [];
+  const mean = new Array(t_axis.length).fill(0);
+  const n = t.traces.length;
+  for (let i = 0; i < n; i++) {
+    traces.push({
+      x: t_axis, y: t.traces[i], type: "scatter", mode: "lines",
+      line: {color: "#999", width: 0.6}, opacity: 0.35,
+      hoverinfo: "skip", showlegend: false,
+    });
+    for (let j = 0; j < t_axis.length; j++) mean[j] += t.traces[i][j] / n;
+  }
+  // bold red well-mean
+  traces.push({
+    x: t_axis, y: mean, type: "scatter", mode: "lines",
+    line: {color: "#b30000", width: 2.2},
+    name: "well-mean",
+  });
+
+  const wellPredMean = c.per_well_pred[KEY];
+  const wellTrue     = c.per_well_true[KEY];
+
+  const shapes = [];
+  if (wellTrue != null) {
+    shapes.push({type: "line", xref: "x", yref: "paper",
+                 x0: wellTrue, x1: wellTrue, y0: 0, y1: 1,
+                 line: {color: "#000", width: 1.2, dash: "dot"}});
+  }
+  if (wellPredMean != null) {
+    shapes.push({type: "line", xref: "x", yref: "paper",
+                 x0: wellPredMean, x1: wellPredMean, y0: 0, y1: 1,
+                 line: {color: "#ff7f0e", width: 1.4, dash: "dot"}});
+  }
+
+  Plotly.newPlot("plot_traces", traces, {
+    margin: {l: 50, r: 10, t: 10, b: 38},
+    xaxis: {title: "time [min]"},
+    yaxis: {title: "trapped-charge-subtracted signal"},
+    shapes: shapes,
+    showlegend: false,
+    annotations: [
+      wellTrue != null ? {x: wellTrue, y: 1.02, xref: "x", yref: "paper",
+        text: `qLAMP TTP = ${wellTrue.toFixed(2)}`, showarrow: false,
+        font: {size: 10, color: "#000"}, xanchor: "left"} : null,
+      wellPredMean != null ? {x: wellPredMean, y: 0.93, xref: "x", yref: "paper",
+        text: `model = ${wellPredMean.toFixed(2)}`, showarrow: false,
+        font: {size: 10, color: "#ff7f0e"}, xanchor: "left"} : null,
+    ].filter(Boolean),
+  }, {displayModeBar: false, responsive: true});
+}
+
+function renderPerPixelScatter() {
+  const c = cell();
+  const t = DATA.sampled_traces[KEY];
+  const preds = c.preds_sampled[KEY] || [];
+  const y_true = t.y_true;
+
+  const xs = new Array(preds.length).fill(y_true);
+  const ys = preds.slice();
+
+  const mean = (ys.reduce((a, b) => a + b, 0)) / Math.max(ys.length, 1);
+
+  // Plot range — generous around the true value
+  const padBase = Math.max(3, ...ys.map(p => Math.abs(p - y_true)));
+  const lo = Math.min(y_true - padBase, y_true - 2) - 1;
+  const hi = Math.max(y_true + padBase, y_true + 2) + 1;
+
+  Plotly.newPlot("plot_per_pixel_yhat", [
+    {x: xs, y: ys, mode: "markers", type: "scatter",
+     marker: {color: "#1f78b4", size: 5, opacity: 0.55},
+     name: "per-pixel predictions"},
+    {x: [lo, hi], y: [lo, hi], mode: "lines", type: "scatter",
+     line: {color: "#000", width: 0.8, dash: "dash"},
+     name: "perfect prediction"},
+    {x: [lo, hi], y: [mean, mean], mode: "lines", type: "scatter",
+     line: {color: "#ff7f0e", width: 1.4},
+     name: `mean(y_pred) = ${mean.toFixed(2)}`},
+  ], {
+    margin: {l: 50, r: 10, t: 10, b: 38},
+    xaxis: {title: "y_true (min)", range: [lo, hi]},
+    yaxis: {title: "y_pred per pixel (min)", range: [lo, hi]},
+    showlegend: true,
+    legend: {x: 0.02, y: 0.98, font: {size: 9},
+             bgcolor: "rgba(255,255,255,0.85)", bordercolor: "#ccc", borderwidth: 1},
+  }, {displayModeBar: false, responsive: true});
+}
+
+function renderPerWellScatter() {
+  const c = cell();
+  const xs = [], ys = [], txt = [], chips = [];
+  DATA.unique_keys.forEach(k => {
+    const yt = c.per_well_true[k];
+    const yp = c.per_well_pred[k];
+    if (yt == null || yp == null) return;
+    xs.push(yt);
+    ys.push(yp);
+    const wid = DATA.sampled_traces[k].well_id;
+    txt.push(`well ${wid}`);
+    chips.push(DATA.sampled_traces[k].chip_id);
+  });
+
+  if (xs.length === 0) {
+    Plotly.purge("plot_per_well");
+    return;
+  }
+
+  const all = xs.concat(ys);
+  const lo = Math.min(...all) - 2;
+  const hi = Math.max(...all) + 2;
+
+  Plotly.newPlot("plot_per_well", [
+    {x: [lo, hi], y: [lo, hi], mode: "lines", type: "scatter",
+     line: {color: "#000", width: 0.8, dash: "dash"}, name: "perfect"},
+    {x: xs, y: ys, mode: "markers+text", type: "scatter",
+     marker: {color: "#b30000", size: 11, symbol: "diamond"},
+     text: txt, textposition: "top center", textfont: {size: 10},
+     name: "well-mean"},
+  ], {
+    margin: {l: 50, r: 10, t: 10, b: 38},
+    xaxis: {title: "y_true (min)", range: [lo, hi]},
+    yaxis: {title: "y_pred well-mean (min)", range: [lo, hi]},
+    showlegend: false,
+    annotations: xs.map((x, i) => ({
+      x: x, y: ys[i], xref: "x", yref: "y",
+      text: `Δ=${(ys[i] - x >= 0 ? "+" : "")}${(ys[i] - x).toFixed(2)}`,
+      showarrow: false, font: {size: 9, color: "#444"},
+      yshift: -18,
+    })),
+  }, {displayModeBar: false, responsive: true});
+
+  // Rule-based comparison strip — SD held-out r² vs log10(conc).
+  // Same metric, same chip, same 5 wells: regression vs rule-based vs qLAMP.
+  const sd = sdHeldOutStats(c);
+  const refs = [
+    {name: "qLAMP (gold)",       r2: SD_RULEBASED.qLAMP.r2, slope: SD_RULEBASED.qLAMP.slope},
+    {name: "TTP (deployed)",     r2: SD_RULEBASED.TTP.r2,   slope: SD_RULEBASED.TTP.slope},
+    {name: "SDM v2",             r2: SD_RULEBASED.SDM.r2,   slope: SD_RULEBASED.SDM.slope},
+    {name: "Cy0 v2",             r2: SD_RULEBASED.Cy0.r2,   slope: SD_RULEBASED.Cy0.slope},
+  ];
+  const refsHtml = refs.map(r => {
+    const cmp = (sd.r2 != null && isFinite(sd.r2) && sd.r2 >= r.r2) ? "≥" : "<";
+    return `<span style="margin-right:14px;">
+      <b>${r.name}</b> r²=${r.r2.toFixed(3)} / slope=${r.slope.toFixed(2)}
+      <span style="color:${cmp === '≥' ? '#2ca02c' : '#888'};">
+        (model ${cmp})</span>
+    </span>`;
+  }).join("");
+  $("per_well_rule_compare").innerHTML = `
+    <b>SD held-out — regression vs rule-based vs qLAMP on the same 5 wells</b>:
+    model <b>r² = ${fmt(sd.r2, 4)}</b> · slope = <b>${fmt(sd.slope, 3)} min/decade</b>.
+    <br>References: ${refsHtml}
+  `;
+}
+
+function renderSummary() {
+  // Sort cells by SD held-out r² vs log10(conc) descending — the
+  // apples-to-apples metric matching the rule-based reports.
+  const rows = [];
+  for (const [k, c] of Object.entries(DATA.cells)) {
+    const sd = sdHeldOutStats(c);
+    rows.push({
+      key: k, model: c.model, loss: c.loss,
+      sd_r2:   sd.r2,
+      sd_slope: sd.slope,
+      pix_mae: c.best3.pixel_mae_min,
+      pix_r2:  c.best3.pixel_r2,
+      wl_mae:  c.best3.well_mae_min,
+      wl_r2:   c.best3.well_r2,
+      wl_pr2:  c.best3.well_pearson_r2,
+      base:    c.best3.baseline_constant_mean_mae,
+      seeds:   c.best3.picked_seeds.join(", "),
+    });
+  }
+  rows.sort((a, b) => (b.sd_r2 || 0) - (a.sd_r2 || 0));
+
+  let html = `<thead>
+    <tr>
+      <th>model</th>
+      <th>loss</th>
+      <th title="Pearson² of per-well predicted TTP vs log10(target concentration) across the 5 SD held-out wells.  Apples-to-apples with the rule-based reports.">
+        SD r² vs<br>log10(conc)
+      </th>
+      <th title="OLS slope of predicted TTP vs log10(concentration) on the SD held-out wells.  Lower (more negative) = stronger dose-response.">
+        SD slope<br>(min/dec)
+      </th>
+      <th title="Squared Pearson correlation of predicted vs qLAMP TTP across the 5 SD-test well-means — the OLD Week 10 metric.">
+        well Pearson²<br>(vs qLAMP)
+      </th>
+      <th>pixel MAE (min)</th>
+      <th>pixel R²</th>
+      <th>well MAE (min)</th>
+      <th>well R²</th>
+      <th>baseline MAE</th>
+      <th>picked seeds</th>
+    </tr>
+  </thead><tbody>`;
+  // Reference: best rule-based r² on SD held-out (SDM = 0.9988).
+  const BEST_RULE_R2 = Math.max(SD_RULEBASED.TTP.r2, SD_RULEBASED.SDM.r2);
+  rows.forEach((r, i) => {
+    const better = r.pix_mae < r.base;
+    const sdr2 = (r.sd_r2 != null && isFinite(r.sd_r2)) ? r.sd_r2 : null;
+    const sdr2_colour = sdr2 == null ? "#444"
+                       : sdr2 >= BEST_RULE_R2 ? "#2ca02c"
+                       : sdr2 >= 0.95 ? "#1f3a6b"
+                       : sdr2 >= 0.90 ? "#444" : "#b30000";
+    const wlpr2 = (r.wl_pr2 != null && isFinite(r.wl_pr2)) ? r.wl_pr2 : null;
+    const pr2_colour = (wlpr2 != null && wlpr2 >= 0.95) ? "#1f3a6b" : "#444";
+    html += `<tr class="${i % 2 ? 'even' : ''}">
+      <td class="k">${r.model}</td>
+      <td class="k">${r.loss}</td>
+      <td><span style="color:${sdr2_colour}; font-weight:600;">
+        ${fmt(r.sd_r2, 4)}</span></td>
+      <td>${fmt(r.sd_slope, 3)}</td>
+      <td><span style="color:${pr2_colour};">
+        ${fmt(r.wl_pr2, 3)}</span></td>
+      <td><span style="color:${better ? '#2ca02c' : '#b30000'}; font-weight:600;">
+        ${fmt(r.pix_mae, 3)}</span></td>
+      <td>${fmt(r.pix_r2, 3)}</td>
+      <td>${fmt(r.wl_mae, 3)}</td>
+      <td>${fmt(r.wl_r2, 3)}</td>
+      <td>${fmt(r.base, 3)}</td>
+      <td class="k">${r.seeds}</td>
+    </tr>`;
+  });
+  // Reference rows: qLAMP + rule-based, in their own block at the bottom.
+  const refRows = [
+    {name: "qLAMP (gold standard)", ...SD_RULEBASED.qLAMP, kind: "gold"},
+    {name: "rule: SDM v2",          ...SD_RULEBASED.SDM,   kind: "rule"},
+    {name: "rule: TTP (deployed)",  ...SD_RULEBASED.TTP,   kind: "rule"},
+    {name: "rule: Cy0 v2",          ...SD_RULEBASED.Cy0,   kind: "rule"},
+  ];
+  refRows.forEach((r, i) => {
+    const bg = r.kind === "gold" ? "#e6f5d0" : "#fff2e6";
+    const styleHead = i === 0 ? "border-top:2px solid #888;" : "";
+    html += `<tr style="${styleHead}background:${bg};">
+      <td class="k" colspan="2"><b>${r.name}</b></td>
+      <td><b>${r.r2.toFixed(4)}</b></td>
+      <td><b>${r.slope.toFixed(3)}</b></td>
+      <td colspan="7" style="color:#555; font-style:italic;">
+        ${r.kind === "gold"
+          ? "Fluorometer reference; n=5 SD wells (each well = one dilution)."
+          : "Deterministic rule on SD wells 0..4 (n=5); same metric as the regression rows above."}
+      </td>
+    </tr>`;
+  });
+  html += "</tbody>";
+  $("summary-table").innerHTML = html;
+}
+</script>
+</body>
+</html>

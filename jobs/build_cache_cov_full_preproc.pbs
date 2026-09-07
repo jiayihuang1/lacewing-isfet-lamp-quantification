@@ -1,0 +1,37 @@
+#!/bin/bash
+#PBS -N build_cls_cache
+#PBS -l select=1:ncpus=4:mem=64gb
+#PBS -l walltime=02:00:00
+#PBS -j oe
+#PBS -o /rds/general/user/jh1125/home/Individual_Project/jobs/logs/
+
+set -e
+cd $PBS_O_WORKDIR
+module load Python/3.12.3-GCCcore-13.3.0
+source .venv/bin/activate
+
+# ------------------------------------------------------------------------------
+# Build the matched-preprocessing classification cache for P3 joint cls+quant.
+# Mirrors regress_all_filt_abcd_ntcRaw_madk1p5_spatA3 preprocessing pipeline.
+#
+# Two steps:
+#   1. MAD-k1.5 filter on the raw abcd ntcRaw cls cache → dataset_all_filt_abcd_ntcRaw_madk1p5
+#   2. Spatial-A order-3 smoothing → dataset_all_filt_abcd_ntcRaw_madk1p5_spatA3
+#
+# The final output is the file P3's _load_ntc_pixels() needs.
+# ------------------------------------------------------------------------------
+
+echo "=== Step 1: MAD-k1.5 filter (ABCD, ntcRaw, scope=all) ==="
+python -m lacewing.classification.data.build_filtered_dataset_mad \
+    --scope all --layers ABCD --k 1.5
+
+echo ""
+echo "=== Step 2: Spatial-A order-3 smoothing on the madk1p5 cache ==="
+python -m lacewing.classification.data.build_spatial_filtered_dataset \
+    --input dataset_all_filt_abcd_ntcRaw_madk1p5 --order 3
+
+echo ""
+echo "=== Verifying output cache ==="
+ls -la Analysis/classification/data/cache/dataset_all_filt_abcd_ntcRaw_madk1p5_spatA3.npz
+echo ""
+echo "=== DONE ==="

@@ -1,0 +1,61 @@
+#!/bin/bash
+#PBS -N conc_e1b_mad
+#PBS -l select=1:ncpus=4:mem=32gb:ngpus=1:gpu_type=L40S
+#PBS -l walltime=02:30:00
+#PBS -J 0-199
+#PBS -j oe
+#PBS -o /rds/general/user/jh1125/home/Individual_Project/jobs/logs/
+
+# E1b: RQ1 classifier arch sweep on KP-conc data with +MAD preprocessing
+# (Layers ABCD k=1.5, no spatA3). Mirrors the SARS-CoV-2 preprocessing
+# ablation of RQ1 Table 5.2 column "+MAD".
+#
+# 8 architectures x 5 LOCO folds x 5 seeds = 200 tasks.
+#
+# Requires the ablation cache to have been built first:
+#   python -m lacewing.quantification.conc_data.build_classification_cache_ablation mad
+
+set -e
+cd $PBS_O_WORKDIR
+module load Python/3.12.3-GCCcore-13.3.0
+source .venv/bin/activate
+
+CACHE_NAME="dataset_conc_mad"
+CACHE_FILE="Analysis/classification/data/cache/${CACHE_NAME}.npz"
+if [ ! -f "$CACHE_FILE" ]; then
+    echo "ERROR: ablation cache not found at $CACHE_FILE"
+    echo "Build it with:"
+    echo "  python -m lacewing.quantification.conc_data.build_classification_cache_ablation mad"
+    exit 1
+fi
+
+MODELS=("ann" "fcn" "resnet" "inception" "gru" "transformer_patch" "cnn_gru_par" "cnn_transformer_seq")
+SEEDS=(0 1 2 3 4)
+FOLDS=(
+    "conc_260812_KP_01"
+    "conc_260813_KP_DDM_02"
+    "conc_260820_KP_DDM_03"
+    "conc_260823_KP_DDM_04"
+    "conc_260827_KP_DDM_05"
+)
+
+IDX=$PBS_ARRAY_INDEX
+MODEL_IDX=$(( IDX / 25 ))
+FOLD_SEED_IDX=$(( IDX % 25 ))
+FOLD_IDX=$(( FOLD_SEED_IDX / 5 ))
+SEED_IDX=$(( FOLD_SEED_IDX % 5 ))
+
+MODEL=${MODELS[$MODEL_IDX]}
+FOLD=${FOLDS[$FOLD_IDX]}
+SEED=${SEEDS[$SEED_IDX]}
+
+echo "[array $IDX] state=+MAD model=$MODEL fold=$FOLD seed=$SEED"
+
+python -m lacewing.classification.core.train \
+    --experiment "conc_ablation_mad_${FOLD}" \
+    --cache "$CACHE_NAME" \
+    --split chip \
+    --fold "$FOLD" \
+    --model "$MODEL" \
+    --seed "$SEED" \
+    --epochs 40

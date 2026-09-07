@@ -1,0 +1,49 @@
+#!/bin/bash
+#PBS -N w19_p4_rerun
+#PBS -l select=1:ncpus=4:mem=32gb:ngpus=1:gpu_type=L40S
+#PBS -l walltime=04:00:00
+#PBS -J 0-3
+#PBS -j oe
+#PBS -o /rds/general/user/jh1125/home/Individual_Project/jobs/logs/
+
+set -e
+cd $PBS_O_WORKDIR
+module load Python/3.12.3-GCCcore-13.3.0
+source .venv/bin/activate
+
+# W19 — bring the two sub-2.15min P4-SSL-alone contrastive variants up to
+# 5 seeds. Both pretrained encoders already exist on disk from earlier
+# tranches (w16_p4_longer_pretrain + w16_p4_tau_sweep); this job only runs
+# the fine-tune step at seeds 3 and 4.
+#
+# 2 encoders × 2 seeds = 4 tasks.
+#
+# Index layout:
+#   ENC_IDX = IDX / 2      (0=epochs100 τ=0.1, 1=epochs50 τ=1.0)
+#   SEED    = 3 + (IDX % 2)
+
+ENCODERS=(
+    "p4_ssl_contrastive_unet_epochs100"   # 3-seed best = 2.13 min
+    "p4_ssl_contrastive_unet_tau1"        # 3-seed best = 2.12 min
+)
+
+IDX=$PBS_ARRAY_INDEX
+ENC_IDX=$(( IDX / 2 ))
+SEED=$(( 3 + (IDX % 2) ))
+
+ENC_NAME=${ENCODERS[$ENC_IDX]}
+ENC_DIR="Analysis/quantification/methods/results/${ENC_NAME}"
+
+echo "[array $IDX] enc=$ENC_NAME seed=$SEED"
+
+if [ ! -f "$ENC_DIR/pretrained.pt" ]; then
+    echo "[ERROR] Missing $ENC_DIR/pretrained.pt --- pretrain step should have"
+    echo "run in an earlier tranche (w16_p4_longer_pretrain / w16_p4_tau_sweep)."
+    exit 1
+fi
+
+python -m lacewing.quantification.methods.ssl_finetune \
+    --objective contrastive --backbone unet \
+    --protocol fullft --downstream fb \
+    --seed "$SEED" --epochs 30 \
+    --pretrained-dir "$ENC_DIR"

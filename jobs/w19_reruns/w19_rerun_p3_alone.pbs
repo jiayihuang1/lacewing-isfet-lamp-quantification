@@ -1,0 +1,45 @@
+#!/bin/bash
+#PBS -N w19_p3_rerun
+#PBS -l select=1:ncpus=4:mem=32gb:ngpus=1:gpu_type=L40S
+#PBS -l walltime=03:00:00
+#PBS -J 0-5
+#PBS -j oe
+#PBS -o /rds/general/user/jh1125/home/Individual_Project/jobs/logs/
+
+set -e
+cd $PBS_O_WORKDIR
+module load Python/3.12.3-GCCcore-13.3.0
+source .venv/bin/activate
+
+# W19 — bring the top P3-joint-alone sub-2min 3-seed candidates up to 5 seeds.
+# Each config already has seeds 0/1/2 from p3_joint_sweep.pbs; this job adds
+# seeds 3/4 for the sub-2min candidates flagged in the final report as
+# pending 5-seed reruns (Table tab:rq3-pending-reruns).
+#
+# 3 configs × 2 seeds = 6 tasks.
+#
+# Index layout:
+#   CFG_IDX = IDX / 2      (0=a5 α=0.3, 1=a4w α=0.3, 2=a4 α=0.3)
+#   SEED    = 3 + (IDX % 2)   (seed 3 or 4)
+
+CFGS=(
+    "a5  0.3"    # current best-of-3 = 1.77 min
+    "a4w 0.3"    # current best-of-3 = 1.91 min
+    "a4  0.3"    # current best-of-3 = 2.01 min
+)
+
+IDX=$PBS_ARRAY_INDEX
+CFG_IDX=$(( IDX / 2 ))
+SEED=$(( 3 + (IDX % 2) ))
+
+CFG=${CFGS[$CFG_IDX]}
+ARCH=$(echo "$CFG" | awk '{print $1}')
+ALPHA=$(echo "$CFG" | awk '{print $2}')
+
+echo "[array $IDX] arch=$ARCH alpha=$ALPHA seed=$SEED"
+
+python -m lacewing.quantification.methods.joint_cls_quant \
+    --arch "$ARCH" --alpha "$ALPHA" --seed "$SEED" \
+    --window 120 --stride 10 \
+    --k_consecutive 3 --k_thr 0.7 \
+    --epochs 30 --lr 1e-3 --batch_size 256

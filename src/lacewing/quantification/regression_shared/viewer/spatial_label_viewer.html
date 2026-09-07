@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Spatial cluster viewer (option 2)</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    margin: 0; padding: 14px; background: #fafafa; color: #222;
+  }
+  h1 { font-size: 18px; margin: 0 0 10px 0; }
+  .status { font-size: 12px; color: #888; margin-left: 8px; }
+  .panel {
+    display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end;
+    padding: 10px 12px; background: #fff; border: 1px solid #e0e0e0;
+    border-radius: 8px; margin-bottom: 12px;
+  }
+  .field { display: flex; flex-direction: column; min-width: 180px; }
+  .field label { font-size: 11px; color: #666; margin-bottom: 4px; }
+  select { font-size: 13px; padding: 6px 8px; border: 1px solid #c8c8c8;
+           border-radius: 6px; background: #fff; color: #222; }
+  option { background: #fff; color: #222; }
+
+  .meta {
+    font-size: 12px; color: #555; background: #fff;
+    border: 1px solid #e0e0e0; border-radius: 6px;
+    padding: 6px 10px; margin-bottom: 10px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .meta b { color: #1f3a6b; }
+  .meta .qlamp { color: #b30000; font-weight: 600; }
+
+  .grid {
+    display: grid; grid-template-columns: 1fr 1.4fr; gap: 12px;
+    margin-bottom: 12px;
+  }
+  .plot-card {
+    background: #fff; border: 1px solid #e0e0e0; border-radius: 8px;
+    padding: 6px 8px;
+  }
+  .plot-card h3 {
+    font-size: 12.5px; margin: 4px 6px 2px; color: #444; font-weight: 600;
+  }
+  .plot-card .note {
+    font-size: 10.5px; color: #888; margin: 0 6px 4px; line-height: 1.4;
+  }
+  .plot { width: 100%; height: 420px; }
+
+  .obs {
+    background: #f3f7fb; border: 1px solid #d8e3f0;
+    border-radius: 8px; padding: 10px 14px;
+    font-size: 12.5px; line-height: 1.55; color: #1f3a6b;
+    margin-bottom: 14px;
+  }
+  .obs ul { margin: 6px 0 0 18px; padding: 0; }
+  .obs li { margin: 4px 0; }
+
+  @media (max-width: 1000px) {
+    .grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Spatial cluster viewer (option 2 — pre-labelling sanity check)
+  <span class="status" id="status">loading …</span>
+</h1>
+
+<div class="obs">
+  <b>What you're looking at.</b>  For each (chip, well), K-means
+  clusters the surviving active pixels into K=8 groups using
+  <b>normalised trace shape</b> as the feature (smoothed trace,
+  per-pixel zero-mean unit-std).
+  <ul>
+    <li><b>Left</b>: spatial map of the well's active pixels coloured by
+        cluster id.  Pixels with the same colour share the same shape
+        cluster — they may or may not be spatially contiguous.</li>
+    <li><b>Right</b>: cluster-mean smoothed signal, one trace per
+        cluster, colour-matched to the spatial map.  The red dashed
+        vertical line is the well's qLAMP-derived ground-truth TTP
+        for reference.</li>
+    <li>Singleton clusters (size 1) are outlier pixels — k-means
+        isolates them.  Trivial to handle in the labelling step.</li>
+  </ul>
+  This page is read-only; labelling will be added once the clustering
+  looks reasonable.
+</div>
+
+<div class="panel">
+  <div class="field">
+    <label>Chip</label>
+    <select id="chip"></select>
+  </div>
+  <div class="field">
+    <label>Well</label>
+    <select id="well"></select>
+  </div>
+  <div class="field">
+    <label>Clustering method</label>
+    <select id="method"></select>
+  </div>
+  <div class="field">
+    <label>K (number of clusters)</label>
+    <select id="k_sel"></select>
+  </div>
+</div>
+
+<div id="method_desc"
+     style="background:#fff7ec; border:1px solid #f0d8b8; border-radius:6px;
+            padding:6px 10px; font-size:12px; color:#7a4a14;
+            margin-bottom:10px;"></div>
+
+<div class="meta" id="meta"></div>
+
+<div class="grid">
+  <div class="plot-card">
+    <h3>1. Spatial map of clusters</h3>
+    <div class="note">Each dot is one surviving active pixel at its
+      (row, col) on the chip.  Colour = cluster id.</div>
+    <div class="plot" id="plot_spatial"></div>
+  </div>
+  <div class="plot-card">
+    <h3>2. Cluster signals
+      <span id="focus_label" style="font-weight:400; color:#777; font-size:11.5px;"></span>
+      <button id="reset_focus" style="float:right; font-size:11px; padding:2px 8px;
+              border:1px solid #c8c8c8; border-radius:4px; background:#fff;
+              cursor:pointer; display:none;">show all clusters</button>
+    </h3>
+    <div class="note">Default view shows one mean per cluster.  Click a
+      cluster (here or on the spatial map) to show its individual pixel
+      traces plus the mean (bold).  Red dashed vertical line = qLAMP
+      well-mean TTP.</div>
+    <div class="plot" id="plot_signals"></div>
+  </div>
+</div>
+
+<script>
+const PALETTE = [
+  "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728",
+  "#9467bd", "#8c564b", "#e377c2", "#7f7f7f",
+];
+
+let DATA = null;
+let CHIP = null, WELL = null, METHOD = null, K = null;
+let FOCUS = null;   // null = show all cluster means; int = drill into one cluster
+
+// Number of clusters in the currently-selected K bucket (== K, defensive copy).
+function currentK() { return K; }
+
+function $(id) { return document.getElementById(id); }
+
+fetch("../data/manual_labels/cluster_data.json")
+  .then(r => r.json())
+  .then(d => {
+    DATA = d;
+    $("status").textContent = "loaded.";
+    initControls();
+    render();
+  })
+  .catch(e => {
+    $("status").textContent = "failed to load: " + e;
+  });
+
+function initControls() {
+  const chipSel = $("chip");
+  Object.keys(DATA.chips).sort().forEach(ck => {
+    const o = document.createElement("option");
+    o.value = ck; o.textContent = ck;
+    chipSel.appendChild(o);
+  });
+  CHIP = chipSel.value;
+  populateWells();
+
+  const mSel = $("method");
+  (DATA.methods || ["trace_shape", "per_pixel_ttp", "spatial"]).forEach(m => {
+    const o = document.createElement("option");
+    o.value = m; o.textContent = m.replace(/_/g, " ");
+    mSel.appendChild(o);
+  });
+  METHOD = mSel.value;
+
+  const kSel = $("k_sel");
+  const kvals = DATA.k_values || [DATA.n_clusters || 8];
+  kvals.forEach(k => {
+    const o = document.createElement("option");
+    o.value = String(k); o.textContent = `K = ${k}`;
+    kSel.appendChild(o);
+  });
+  // Default to the largest K so the initial view matches the previous
+  // (single-K) behaviour.
+  K = kvals[kvals.length - 1];
+  kSel.value = String(K);
+
+  chipSel.addEventListener("change", () => {
+    CHIP = chipSel.value;
+    populateWells();
+    FOCUS = null;
+    render();
+  });
+  $("well").addEventListener("change", e => {
+    WELL = e.target.value;
+    FOCUS = null;
+    render();
+  });
+  mSel.addEventListener("change", e => {
+    METHOD = e.target.value;
+    FOCUS = null;
+    render();
+  });
+  kSel.addEventListener("change", e => {
+    K = parseInt(e.target.value, 10);
+    FOCUS = null;
+    render();
+  });
+  $("reset_focus").addEventListener("click", () => {
+    FOCUS = null;
+    render();
+  });
+}
+
+function populateWells() {
+  const wSel = $("well");
+  wSel.innerHTML = "";
+  const wells = Object.keys(DATA.chips[CHIP].wells).sort((a, b) => +a - +b);
+  wells.forEach(w => {
+    const o = document.createElement("option");
+    o.value = w; o.textContent = `well ${w}`;
+    wSel.appendChild(o);
+  });
+  WELL = wells[0];
+  wSel.value = WELL;
+}
+
+// Resolve the focused well + chosen method block at the chosen K.
+// Returns {wb, mb, qlamp}.  Schema v3 nests methods as
+// methods[method][K_string].  We also fall back to the v2 shape
+// (methods[method]) so the viewer is robust to older sidecars.
+function _current() {
+  const chipBlk = DATA.chips[CHIP];
+  const wb = chipBlk.wells[WELL];
+  const methodGroup = wb && wb.methods ? wb.methods[METHOD] : null;
+  let mb = null;
+  if (methodGroup) {
+    if (Object.prototype.hasOwnProperty.call(methodGroup, String(K))) {
+      mb = methodGroup[String(K)];
+    } else if (methodGroup.cluster_size !== undefined) {
+      // legacy v2 flat structure
+      mb = methodGroup;
+    }
+  }
+  const qlamp = chipBlk.qlamp_well_ttp_min[WELL];
+  return {chipBlk, wb, mb, qlamp};
+}
+
+// Given a method block + parent (chip, well), return the pixel-index
+// list that this method actually clustered (kept_idx for per_pixel_ttp,
+// the full range otherwise).
+function _methodKeptIdx(wb, mb) {
+  if (mb.kept_idx && mb.kept_idx.length > 0) return mb.kept_idx;
+  // No drops -> all pixels participated.
+  return wb.cluster_id_default || Array.from({length: wb.rows.length}, (_, i) => i);
+}
+
+function render() {
+  if (!CHIP || !WELL || !METHOD) return;
+  const {chipBlk, wb, mb, qlamp} = _current();
+  if (!wb) {
+    $("meta").innerHTML = `(no data for chip ${CHIP} well ${WELL})`;
+    return;
+  }
+  if (!mb) {
+    $("meta").innerHTML = `(no data for method ${METHOD} on this well)`;
+    return;
+  }
+
+  // Method-description strip
+  $("method_desc").textContent =
+    DATA.method_descriptions?.[METHOD] || "";
+
+  // Cluster sizes (in the order 0..K-1)
+  const sizes = [];
+  for (let c = 0; c < K; c++) {
+    sizes.push(mb.cluster_size?.[String(c)] ?? 0);
+  }
+  const dropPart = (mb.n_dropped && mb.n_dropped > 0)
+    ? ` &nbsp; <b>dropped (TTP-NaN):</b> ${mb.n_dropped}` : "";
+  const clusteredPart = (mb.n_total != null && mb.n_total !== wb.n_pixels)
+    ? ` &nbsp; <b>clustered:</b> ${mb.n_total}` : "";
+
+  $("meta").innerHTML =
+    `<b>chip:</b> ${CHIP} &nbsp; <b>well:</b> ${WELL} &nbsp; ` +
+    `<b>method:</b> ${METHOD} &nbsp; ` +
+    `<b>n_pixels:</b> ${wb.n_pixels}` + clusteredPart + dropPart + ` &nbsp; ` +
+    `<b>well dims:</b> ${wb.well_nrows} × ${wb.well_ncols} &nbsp; ` +
+    `<b>K:</b> ${K} &nbsp; ` +
+    `<b>cluster sizes:</b> ${sizes.join(", ")} &nbsp; ` +
+    (qlamp != null
+      ? `<span class="qlamp">qLAMP well TTP = ${qlamp.toFixed(2)} min</span>`
+      : `<span class="qlamp">qLAMP TTP unknown</span>`);
+
+  if (mb.skip_reason) {
+    $("plot_spatial").innerHTML =
+      `<div style="padding:20px; color:#b00; font-size:12px;">
+         No clustering for this (chip, well, method): ${mb.skip_reason}
+       </div>`;
+    $("plot_signals").innerHTML = "";
+    syncFocusUI();
+    return;
+  }
+
+  renderSpatial(wb, mb);
+  renderSignals(wb, mb, qlamp);
+  syncFocusUI();
+}
+
+function setFocus(cid) {
+  FOCUS = cid;
+  render();
+}
+
+function syncFocusUI() {
+  const btn = $("reset_focus");
+  const lbl = $("focus_label");
+  const {mb} = _current();
+  if (!mb || FOCUS == null) {
+    btn.style.display = "none";
+    lbl.textContent = "";
+    return;
+  }
+  btn.style.display = "inline-block";
+  const sz = mb.cluster_size?.[String(FOCUS)] ?? 0;
+  const emit = (mb.cluster_traces?.[String(FOCUS)] || []).length;
+  let extra = "";
+  if (METHOD === "per_pixel_ttp" && mb.cluster_mean_ttp_min) {
+    const mt = mb.cluster_mean_ttp_min[String(FOCUS)];
+    if (mt != null) extra = ` — cluster mean TTP = ${mt.toFixed(2)} min`;
+  }
+  lbl.textContent = ` — focused on cluster ${FOCUS} (n=${sz}` +
+    (emit < sz ? `, ${emit} shown` : "") + ")" + extra;
+}
+
+function renderSpatial(wb, mb) {
+  // For per_pixel_ttp the spatial map should only show pixels that the
+  // deployed TTP method successfully extracted from (i.e. kept_idx).
+  // For trace_shape and spatial the cluster_id array is indexed pixel-by-pixel.
+  const cluster_ids = mb.cluster_id || [];
+  const kept_idx    = mb.kept_idx;
+  const has_kept    = kept_idx && kept_idx.length > 0;
+  const n_in = cluster_ids.length;
+
+  const traces = [];
+  for (let c = 0; c < K; c++) {
+    const xs = [];
+    const ys = [];
+    for (let i = 0; i < n_in; i++) {
+      if (cluster_ids[i] !== c) continue;
+      const pixIdx = has_kept ? kept_idx[i] : i;
+      xs.push(wb.cols[pixIdx]);
+      ys.push(wb.rows[pixIdx]);
+    }
+    if (xs.length === 0) {
+      // Push an empty trace so the curveNumber-to-cluster mapping is
+      // still cluster id = curveNumber.
+      traces.push({
+        x: [], y: [], mode: "markers", type: "scatter",
+        marker: {color: PALETTE[c % PALETTE.length], size: 5, opacity: 0.85},
+        name: `c${c} (0)`, showlegend: false,
+      });
+      continue;
+    }
+    let extraName = "";
+    if (METHOD === "per_pixel_ttp" && mb.cluster_mean_ttp_min) {
+      const mt = mb.cluster_mean_ttp_min[String(c)];
+      if (mt != null) extraName = ` — TTP ${mt.toFixed(2)}m`;
+    }
+    traces.push({
+      x: xs, y: ys, mode: "markers", type: "scatter",
+      marker: {
+        color: PALETTE[c % PALETTE.length],
+        size: (FOCUS == null || FOCUS === c) ? 5 : 3,
+        opacity: (FOCUS == null || FOCUS === c) ? 0.85 : 0.18,
+      },
+      name: `c${c} (${xs.length})${extraName}`,
+      hovertemplate: `cluster ${c}<br>(col=%{x}, row=%{y})<extra></extra>`,
+    });
+  }
+  Plotly.newPlot("plot_spatial", traces, {
+    margin: {l: 50, r: 10, t: 10, b: 38},
+    xaxis: {title: "column", range: [0, wb.well_ncols],
+            constrain: "domain"},
+    yaxis: {title: "row", range: [wb.well_nrows, 0],
+            scaleanchor: "x", scaleratio: 1},
+    showlegend: true,
+    legend: {x: 1.02, y: 1.0, font: {size: 10},
+             bgcolor: "rgba(255,255,255,0.85)",
+             bordercolor: "#ccc", borderwidth: 1},
+    hovermode: "closest",
+  }, {displayModeBar: false, responsive: true});
+
+  const div = $("plot_spatial");
+  div.removeAllListeners?.("plotly_click");
+  div.on("plotly_click", (ev) => {
+    if (!ev || !ev.points || ev.points.length === 0) return;
+    const cid = ev.points[0].curveNumber;
+    setFocus(cid);
+  });
+  div.on("plotly_legendclick", (ev) => {
+    setFocus(ev.curveNumber);
+    return false;  // suppress the default hide-trace behaviour
+  });
+}
+
+function renderSignals(wb, mb, qlamp) {
+  const t = DATA.t_axis_min;
+  const traces = [];
+
+  if (FOCUS == null) {
+    // Default view: K cluster means.
+    for (let c = 0; c < K; c++) {
+      const m = mb.cluster_mean?.[String(c)];
+      if (!m || m.length === 0) continue;
+      let extraName = "";
+      if (METHOD === "per_pixel_ttp" && mb.cluster_mean_ttp_min) {
+        const mt = mb.cluster_mean_ttp_min[String(c)];
+        if (mt != null) extraName = ` — TTP ${mt.toFixed(2)}m`;
+      }
+      traces.push({
+        x: t, y: m, mode: "lines", type: "scatter",
+        line: {color: PALETTE[c % PALETTE.length], width: 1.8},
+        name: `c${c} (n=${mb.cluster_size[c]})${extraName}`,
+        hovertemplate: `cluster ${c} (n=${mb.cluster_size[c]})<br>t=%{x:.2f} min<br>v=%{y:.4f}<extra></extra>`,
+      });
+    }
+  } else {
+    // Focused view: individual pixel traces for the focused cluster,
+    // plus the cluster mean overlaid bold.
+    const cstr = String(FOCUS);
+    const ts = mb.cluster_traces?.[cstr] || [];
+    const colour = PALETTE[FOCUS % PALETTE.length];
+    for (let i = 0; i < ts.length; i++) {
+      const tr = ts[i];
+      traces.push({
+        x: t, y: tr.trace, mode: "lines", type: "scatter",
+        line: {color: colour, width: 0.7},
+        opacity: 0.30,
+        showlegend: false,
+        hoverinfo: "skip",
+      });
+    }
+    const mean = mb.cluster_mean?.[cstr];
+    if (mean && mean.length > 0) {
+      traces.push({
+        x: t, y: mean, mode: "lines", type: "scatter",
+        line: {color: colour, width: 2.6},
+        name: `c${FOCUS} mean (n=${mb.cluster_size[cstr]})`,
+        hovertemplate: `cluster ${FOCUS} mean<br>t=%{x:.2f} min<br>v=%{y:.4f}<extra></extra>`,
+      });
+    }
+  }
+
+  const shapes = [];
+  if (qlamp != null) {
+    shapes.push({type: "line", xref: "x", yref: "paper",
+                 x0: qlamp, x1: qlamp, y0: 0, y1: 1,
+                 line: {color: "#b30000", width: 1.6, dash: "dash"}});
+  }
+  const annot = qlamp != null
+    ? [{x: qlamp, y: 1.02, xref: "x", yref: "paper",
+        text: `qLAMP TTP = ${qlamp.toFixed(2)}`, showarrow: false,
+        font: {size: 10, color: "#b30000"}, xanchor: "left"}]
+    : [];
+  // For Method B, add a vertical line at the focused cluster's mean
+  // computed TTP, so we can compare against qLAMP at a glance.
+  if (FOCUS != null && METHOD === "per_pixel_ttp" && mb.cluster_mean_ttp_min) {
+    const mt = mb.cluster_mean_ttp_min[String(FOCUS)];
+    if (mt != null) {
+      shapes.push({type: "line", xref: "x", yref: "paper",
+                   x0: mt, x1: mt, y0: 0, y1: 1,
+                   line: {color: PALETTE[FOCUS % PALETTE.length],
+                          width: 1.4, dash: "dot"}});
+      annot.push({
+        x: mt, y: 0.96, xref: "x", yref: "paper",
+        text: `cluster mean TTP = ${mt.toFixed(2)}`, showarrow: false,
+        font: {size: 10, color: PALETTE[FOCUS % PALETTE.length]},
+        xanchor: "left",
+      });
+    }
+  }
+
+  Plotly.newPlot("plot_signals", traces, {
+    margin: {l: 55, r: 10, t: 10, b: 38},
+    xaxis: {title: "time [min]"},
+    yaxis: {title: "smoothed BS signal (V)"},
+    shapes: shapes,
+    annotations: annot,
+    showlegend: true,
+    legend: {x: 0.02, y: 0.98, font: {size: 10},
+             bgcolor: "rgba(255,255,255,0.85)",
+             bordercolor: "#ccc", borderwidth: 1},
+    hovermode: "closest",
+  }, {displayModeBar: false, responsive: true});
+}
+</script>
+</body>
+</html>

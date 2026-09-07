@@ -1,0 +1,557 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>F-B methodology + extraction-rule viewer</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    margin: 0; padding: 14px; background: #fafafa; color: #222;
+  }
+  h1 { font-size: 18px; margin: 0 0 10px 0; }
+  h2 {
+    font-size: 15px; margin: 22px 0 6px 0;
+    color: #1f3a6b; border-bottom: 2px solid #d0d8e3; padding-bottom: 3px;
+  }
+  h3 { font-size: 12.5px; margin: 4px 6px 2px; color: #444; font-weight: 600; }
+  .status { font-size: 12px; color: #888; margin-left: 8px; }
+
+  .panel {
+    display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end;
+    padding: 10px 12px; background: #fff; border: 1px solid #e0e0e0;
+    border-radius: 8px; margin-bottom: 12px;
+  }
+  .field { display: flex; flex-direction: column; min-width: 180px; }
+  .field label { font-size: 11px; color: #666; margin-bottom: 4px; }
+  select { font-size: 13px; padding: 6px 8px; border: 1px solid #c8c8c8;
+           border-radius: 6px; background: #fff; color: #222; }
+  option { background: #fff; color: #222; }
+
+  .obs {
+    background: #f3f7fb; border: 1px solid #d8e3f0;
+    border-radius: 8px; padding: 10px 14px;
+    font-size: 12.5px; line-height: 1.55; color: #1f3a6b;
+    margin-bottom: 14px;
+  }
+  .obs ul { margin: 6px 0 0 18px; padding: 0; }
+  .obs li { margin: 4px 0; }
+  .obs b { color: #1f3a6b; }
+
+  .plot-card {
+    background: #fff; border: 1px solid #e0e0e0; border-radius: 8px;
+    padding: 8px 12px; margin-bottom: 10px;
+  }
+  .plot-card .note {
+    font-size: 10.5px; color: #888; margin: 0 6px 6px; line-height: 1.4;
+  }
+  .plot { width: 100%; height: 360px; }
+
+  .rule-summary {
+    background: #fff;
+    border: 1px solid #e0e0e0; border-radius: 8px;
+    padding: 10px 14px; margin: 10px 0;
+    font-size: 12.5px; color: #222;
+  }
+  .rule-summary .rule-label {
+    font-size: 14px; font-weight: 700; color: #1f3a6b;
+  }
+  .rule-summary .rule-family {
+    font-size: 11px; color: #666; margin-left: 8px;
+  }
+  .rule-summary .stats {
+    margin-top: 6px; display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 3px 12px; align-items: baseline;
+  }
+  .rule-summary .stats .k { color: #666; font-weight: 600; font-size: 11px; }
+  .rule-summary .stats .v { color: #1f3a6b; font-weight: 600; }
+  .rule-summary .stats .num { color: #1f3a6b; font-weight: 600; }
+  .rule-summary .stats .err-good { color: #2ca02c; font-weight: 600; }
+  .rule-summary .stats .err-bad { color: #b30000; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<h1>F-B methodology + extraction-rule viewer
+  <span class="status" id="status">loading …</span>
+</h1>
+
+<div class="obs">
+  <b>What this shows.</b>  Every F-B (sliding-window classifier) checkpoint
+  is trained on windowed slices of the ISFET trace and outputs a per-window
+  post-amp probability curve.  This viewer shows, for a chosen window
+  configuration + well:
+  <ul>
+    <li><b>Part A — Methodology.</b>  How the raw ISFET trace maps to the
+      per-window probability curve.  Grey lines = every test pixel in the
+      well; bold red = well-mean.</li>
+    <li><b>Part B — Extraction-rule comparison.</b>  Same well, but pick
+      any of the 16 TTP-extraction rules and see where each rule would
+      place TTP.  Rug plot below shows per-pixel TTP predictions from the
+      selected rule.</li>
+  </ul>
+  Seed 0 across all four F-B window configurations (W ∈ {30, 60, 90, 120}
+  samples).
+</div>
+
+<div class="panel">
+  <div class="field">
+    <label>Window configuration</label>
+    <select id="window"></select>
+  </div>
+  <div class="field">
+    <label>Well</label>
+    <select id="well"></select>
+  </div>
+</div>
+
+<h2>Part A — How the sliding-window classifier works</h2>
+
+<div class="plot-card">
+  <h3>1. Raw ISFET trace (all test pixels in this well)</h3>
+  <div class="note">
+    Grey lines = every test pixel (~1350 per well).  Bold red = well-mean trace.
+    Red dashed vertical = qLAMP TTP (ground-truth label from paired fluorescence
+    run).  Coloured bands beneath the trace = a representative sample of the
+    sliding windows the classifier saw (window index colour-coded by centre time).
+  </div>
+  <div class="plot" id="plot_trace"></div>
+</div>
+
+<div class="plot-card">
+  <h3>2. Per-window sigmoid probability curve P(post-amp | window)</h3>
+  <div class="note">
+    Same wells as above.  Grey = per-pixel P(t) curves; bold red = well-mean P(t).
+    Horizontal grey line at 0.5 = the default threshold used by many extraction rules.
+    Red dashed vertical = qLAMP TTP mapped to window-centre-time.
+  </div>
+  <div class="plot" id="plot_probs"></div>
+</div>
+
+<h2>Part B — Effect of TTP-extraction rule choice</h2>
+
+<div class="panel">
+  <div class="field">
+    <label>Extraction rule</label>
+    <select id="rule"></select>
+  </div>
+</div>
+
+<div class="rule-summary" id="rule-summary">…</div>
+
+<div class="plot-card">
+  <h3>3. Per-window P(t) with predicted-TTP markers</h3>
+  <div class="note">
+    Grey = per-pixel P(t) curves; bold red = well-mean.
+    Vertical dashed red = qLAMP TTP (ground truth).
+    Vertical dashed orange = well-mean predicted TTP under the selected rule.
+    Rug (bottom) = every pixel's individual predicted TTP under this rule.
+  </div>
+  <div class="plot" id="plot_rule"></div>
+</div>
+
+<div class="plot-card">
+  <h3>4. Distribution of predicted TTP across the well</h3>
+  <div class="note">
+    Histogram of every test pixel's predicted TTP under the selected rule.
+    Vertical red = qLAMP TTP (well ground-truth).
+    Vertical orange = mean of predicted TTPs across the well.
+  </div>
+  <div class="plot" id="plot_hist"></div>
+</div>
+
+<script>
+let DATA = null;
+let WINDOW_KEY = null, WELL = null, RULE = null;
+
+function $(id) { return document.getElementById(id); }
+
+function fmt(x, dp = 2) {
+  if (x == null || !isFinite(Number(x))) return "—";
+  return Number(x).toFixed(dp);
+}
+
+function meanArr(a) {
+  const finite = a.filter(v => v != null && isFinite(v));
+  if (!finite.length) return NaN;
+  return finite.reduce((s, v) => s + v, 0) / finite.length;
+}
+
+function stdArr(a) {
+  const finite = a.filter(v => v != null && isFinite(v));
+  if (finite.length < 2) return NaN;
+  const m = meanArr(finite);
+  const v = finite.reduce((s, x) => s + (x - m) * (x - m), 0) / (finite.length - 1);
+  return Math.sqrt(v);
+}
+
+fetch("fb_viewer_data.json")
+  .then(r => r.json())
+  .then(d => {
+    DATA = d;
+    $("status").textContent = "loaded.";
+    initControls();
+    render();
+  })
+  .catch(e => {
+    $("status").innerHTML =
+      'failed to load JSON from file:// URL (browser CORS restriction).  ' +
+      '<b>Open <code>fb_viewer_standalone.html</code> instead</b> ' +
+      '(regenerate via <code>python -m Analysis.quantification.viewer.export_fb_viewer_data</code>).';
+  });
+
+function initControls() {
+  // Window dropdown
+  const wSel = $("window");
+  wSel.innerHTML = "";
+  Object.keys(DATA.windows).forEach(k => {
+    const w = DATA.windows[k];
+    const o = document.createElement("option");
+    o.value = k;
+    o.textContent = `W=${w.W} samples (${(w.W / DATA.samples_per_min).toFixed(1)} min) · stride=${w.stride}`;
+    wSel.appendChild(o);
+  });
+  WINDOW_KEY = Object.keys(DATA.windows)[0];
+  wSel.value = WINDOW_KEY;
+  wSel.addEventListener("change", e => {
+    WINDOW_KEY = e.target.value;
+    initWellDropdown();
+    render();
+  });
+
+  initWellDropdown();
+
+  // Rule dropdown
+  const rSel = $("rule");
+  rSel.innerHTML = "";
+  DATA.rules.forEach(r => {
+    const o = document.createElement("option");
+    o.value = r.id;
+    o.textContent = `${r.label}  [${r.family}]`;
+    rSel.appendChild(o);
+  });
+  // Default: the winning rule.
+  const defaultRule = DATA.rules.find(r => r.id === "argmax_P") || DATA.rules[0];
+  RULE = defaultRule.id;
+  rSel.value = RULE;
+  rSel.addEventListener("change", e => {
+    RULE = e.target.value;
+    renderRulePart();
+  });
+}
+
+function initWellDropdown() {
+  const currentWindow = DATA.windows[WINDOW_KEY];
+  const wells = currentWindow.wells;
+  const wSel = $("well");
+  wSel.innerHTML = "";
+  Object.keys(wells).sort((a, b) => +a - +b).forEach(k => {
+    const w = wells[k];
+    const o = document.createElement("option");
+    o.value = k;
+    o.textContent = `well ${w.well_id} (${w.n_pixels} px, qLAMP TTP = ${w.y_true_min} min)`;
+    wSel.appendChild(o);
+  });
+  WELL = Object.keys(wells)[0];
+  wSel.value = WELL;
+  wSel.addEventListener("change", e => {
+    WELL = e.target.value;
+    render();
+  });
+}
+
+function currentWindow() { return DATA.windows[WINDOW_KEY]; }
+function currentWell()   { return currentWindow().wells[WELL]; }
+
+function render() {
+  renderTracesPlot();
+  renderProbsPlot();
+  renderRulePart();
+}
+
+function renderTracesPlot() {
+  const win = currentWindow();
+  const well = currentWell();
+  const t = DATA.t_axis_min;
+
+  const traces = [];
+  // Per-pixel traces (subsample if huge for perf).
+  const stride_px = Math.max(1, Math.ceil(well.traces_ds.length / 200));
+  for (let i = 0; i < well.traces_ds.length; i += stride_px) {
+    traces.push({
+      x: t,
+      y: well.traces_ds[i],
+      mode: "lines",
+      line: { color: "rgba(120,120,120,0.15)", width: 0.7 },
+      showlegend: false,
+      hoverinfo: "skip",
+    });
+  }
+  // Bold well-mean
+  traces.push({
+    x: t,
+    y: well.mean_trace,
+    mode: "lines",
+    line: { color: "#b30000", width: 2.5 },
+    name: `well-mean trace (n=${well.n_pixels})`,
+  });
+
+  const shapes = [
+    {
+      type: "line", x0: well.y_true_min, x1: well.y_true_min,
+      y0: 0, y1: 1, yref: "paper",
+      line: { color: "#b30000", width: 2, dash: "dash" },
+    },
+  ];
+
+  // Show window centres as coloured tick marks at the bottom of the trace area.
+  const wc = win.window_centres_min;
+  const cmap = (i) => {
+    // Simple viridis-lite ramp
+    const f = i / Math.max(wc.length - 1, 1);
+    const r = Math.round(68 + f * (253 - 68));
+    const g = Math.round(1 + f * (231 - 1));
+    const b = Math.round(84 + f * (37 - 84));
+    return `rgba(${r},${g},${b},0.4)`;
+  };
+  const ann = wc.map((c, i) => ({
+    x: c, y: 0.05, yref: "paper",
+    text: "▲",
+    showarrow: false,
+    font: { size: 10, color: cmap(i) },
+  }));
+
+  Plotly.newPlot("plot_trace", traces, {
+    xaxis: { title: "time (min)", zeroline: false },
+    yaxis: { title: "normalised signal (spatA3)" },
+    margin: { l: 55, r: 15, t: 25, b: 45 },
+    shapes: shapes,
+    annotations: [{
+      x: well.y_true_min, y: 1.03, yref: "paper",
+      text: `qLAMP TTP ${well.y_true_min}`, showarrow: false,
+      font: { color: "#b30000", size: 10 },
+    }, ...ann.filter((_, i) => i % Math.ceil(wc.length / 20) === 0)],
+    hovermode: "closest",
+    showlegend: true,
+    legend: { x: 0.02, y: 0.02, bgcolor: "rgba(255,255,255,0.85)" },
+  }, { displayModeBar: false, responsive: true });
+}
+
+function renderProbsPlot() {
+  const win = currentWindow();
+  const well = currentWell();
+  const wc = win.window_centres_min;
+
+  const traces = [];
+  const stride_px = Math.max(1, Math.ceil(well.probs.length / 200));
+  for (let i = 0; i < well.probs.length; i += stride_px) {
+    traces.push({
+      x: wc,
+      y: well.probs[i],
+      mode: "lines",
+      line: { color: "rgba(120,120,120,0.15)", width: 0.7 },
+      showlegend: false,
+      hoverinfo: "skip",
+    });
+  }
+  traces.push({
+    x: wc,
+    y: well.mean_probs,
+    mode: "lines",
+    line: { color: "#b30000", width: 2.5 },
+    name: `well-mean P(t) (n=${well.n_pixels})`,
+  });
+
+  Plotly.newPlot("plot_probs", traces, {
+    xaxis: { title: "window centre time (min)", zeroline: false },
+    yaxis: { title: "P(post-amp | window)", range: [-0.05, 1.05] },
+    margin: { l: 55, r: 15, t: 25, b: 45 },
+    shapes: [
+      {
+        type: "line", x0: well.y_true_min, x1: well.y_true_min,
+        y0: 0, y1: 1, yref: "paper",
+        line: { color: "#b30000", width: 2, dash: "dash" },
+      },
+      {
+        type: "line", x0: 0, x1: 1, xref: "paper",
+        y0: 0.5, y1: 0.5,
+        line: { color: "#888", width: 1, dash: "dot" },
+      },
+    ],
+    annotations: [{
+      x: well.y_true_min, y: 1.03, yref: "paper",
+      text: `qLAMP TTP ${well.y_true_min}`, showarrow: false,
+      font: { color: "#b30000", size: 10 },
+    }],
+    hovermode: "closest",
+    showlegend: true,
+    legend: { x: 0.02, y: 0.98, bgcolor: "rgba(255,255,255,0.85)" },
+  }, { displayModeBar: false, responsive: true });
+}
+
+function renderRulePart() {
+  const win = currentWindow();
+  const well = currentWell();
+  const rule = DATA.rules.find(r => r.id === RULE);
+  const ttps = well.rules_ttp[RULE] || [];
+
+  const meanTTP = meanArr(ttps);
+  const stdTTP = stdArr(ttps);
+  const err = meanTTP - well.y_true_min;
+  const errClass = Math.abs(err) < 1.0 ? "err-good" : "err-bad";
+
+  const summary = `
+    <div>
+      <span class="rule-label">${rule.label}</span>
+      <span class="rule-family">family: ${rule.family}</span>
+    </div>
+    <div class="stats">
+      <div class="k">Rule id</div><div class="v"><code>${rule.id}</code></div>
+      <div class="k">qLAMP TTP (ground truth)</div><div class="num">${well.y_true_min} min</div>
+      <div class="k">Well-mean predicted TTP</div><div class="num">${fmt(meanTTP)} min</div>
+      <div class="k">Within-well predicted-TTP std</div><div class="num">${fmt(stdTTP)} min</div>
+      <div class="k">Mean prediction − qLAMP</div><div class="${errClass}">${err >= 0 ? "+" : ""}${fmt(err)} min</div>
+      <div class="k">N pixels</div><div class="v">${ttps.length}</div>
+    </div>
+  `;
+  $("rule-summary").innerHTML = summary;
+
+  renderRulePlot(meanTTP, stdTTP, ttps);
+  renderHistPlot(meanTTP, ttps);
+}
+
+function renderRulePlot(meanTTP, stdTTP, ttps) {
+  const win = currentWindow();
+  const well = currentWell();
+  const wc = win.window_centres_min;
+
+  const traces = [];
+  // Grey per-pixel P(t) curves
+  const stride_px = Math.max(1, Math.ceil(well.probs.length / 200));
+  for (let i = 0; i < well.probs.length; i += stride_px) {
+    traces.push({
+      x: wc,
+      y: well.probs[i],
+      mode: "lines",
+      line: { color: "rgba(120,120,120,0.15)", width: 0.7 },
+      showlegend: false,
+      hoverinfo: "skip",
+    });
+  }
+  // Mean P(t)
+  traces.push({
+    x: wc,
+    y: well.mean_probs,
+    mode: "lines",
+    line: { color: "#b30000", width: 2.5 },
+    name: "well-mean P(t)",
+  });
+  // Rug at y=0.03 for per-pixel predicted TTPs.
+  const finiteTTPs = ttps.filter(v => v != null && isFinite(v));
+  const rug_x = [];
+  const rug_y = [];
+  for (const ttp of finiteTTPs) {
+    rug_x.push(ttp); rug_y.push(0.03);
+  }
+  traces.push({
+    x: rug_x, y: rug_y,
+    mode: "markers",
+    marker: { symbol: "line-ns", color: "rgba(255,127,14,0.4)", size: 10, line: { width: 1.2 } },
+    name: `predicted TTP (per pixel, n=${finiteTTPs.length})`,
+    hoverinfo: "x",
+  });
+
+  const shapes = [
+    // qLAMP TTP
+    {
+      type: "line", x0: well.y_true_min, x1: well.y_true_min,
+      y0: 0, y1: 1, yref: "paper",
+      line: { color: "#b30000", width: 2, dash: "dash" },
+    },
+    // Mean predicted TTP
+    {
+      type: "line", x0: meanTTP, x1: meanTTP,
+      y0: 0, y1: 1, yref: "paper",
+      line: { color: "#ff7f0e", width: 2, dash: "dash" },
+    },
+    // Threshold 0.5
+    {
+      type: "line", x0: 0, x1: 1, xref: "paper",
+      y0: 0.5, y1: 0.5,
+      line: { color: "#888", width: 1, dash: "dot" },
+    },
+  ];
+
+  Plotly.newPlot("plot_rule", traces, {
+    xaxis: { title: "window centre time (min)" },
+    yaxis: { title: "P(post-amp | window)", range: [-0.1, 1.05] },
+    margin: { l: 55, r: 15, t: 25, b: 45 },
+    shapes: shapes,
+    annotations: [
+      {
+        x: well.y_true_min, y: 1.03, yref: "paper",
+        text: `qLAMP TTP ${well.y_true_min}`, showarrow: false,
+        font: { color: "#b30000", size: 10 },
+      },
+      {
+        x: meanTTP, y: 0.96, yref: "paper",
+        text: `predicted mean ${fmt(meanTTP)}`, showarrow: false,
+        font: { color: "#ff7f0e", size: 10 },
+      },
+    ],
+    hovermode: "closest",
+    showlegend: true,
+    legend: { x: 0.02, y: 0.98, bgcolor: "rgba(255,255,255,0.85)" },
+  }, { displayModeBar: false, responsive: true });
+}
+
+function renderHistPlot(meanTTP, ttps) {
+  const well = currentWell();
+  const finite = ttps.filter(v => v != null && isFinite(v));
+
+  Plotly.newPlot("plot_hist", [
+    {
+      x: finite,
+      type: "histogram",
+      marker: { color: "rgba(255,127,14,0.7)" },
+      xbins: { size: 0.5 },
+      name: "predicted TTP",
+    },
+  ], {
+    xaxis: { title: "predicted TTP (min)" },
+    yaxis: { title: "count (pixels)" },
+    margin: { l: 55, r: 15, t: 25, b: 45 },
+    shapes: [
+      {
+        type: "line", x0: well.y_true_min, x1: well.y_true_min,
+        y0: 0, y1: 1, yref: "paper",
+        line: { color: "#b30000", width: 2, dash: "dash" },
+      },
+      {
+        type: "line", x0: meanTTP, x1: meanTTP,
+        y0: 0, y1: 1, yref: "paper",
+        line: { color: "#ff7f0e", width: 2, dash: "dash" },
+      },
+    ],
+    annotations: [
+      {
+        x: well.y_true_min, y: 1.05, yref: "paper",
+        text: `qLAMP TTP ${well.y_true_min}`, showarrow: false,
+        font: { color: "#b30000", size: 10 },
+      },
+      {
+        x: meanTTP, y: 0.96, yref: "paper",
+        text: `mean pred ${fmt(meanTTP)}`, showarrow: false,
+        font: { color: "#ff7f0e", size: 10 },
+      },
+    ],
+    bargap: 0.02,
+    hovermode: "closest",
+    showlegend: false,
+  }, { displayModeBar: false, responsive: true });
+}
+</script>
+</body>
+</html>

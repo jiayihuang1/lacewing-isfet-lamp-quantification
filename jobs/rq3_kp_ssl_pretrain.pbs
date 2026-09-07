@@ -1,0 +1,37 @@
+#!/bin/bash
+#PBS -N conc_pretrain
+#PBS -l select=1:ncpus=4:mem=32gb:ngpus=1:gpu_type=L40S
+#PBS -l walltime=05:00:00
+#PBS -J 0-1
+#PBS -j oe
+#PBS -o /rds/general/user/jh1125/home/Individual_Project/jobs/logs/
+
+# SSL pretraining on the KP-conc corpus (all 5 chips' pixels).
+# 2 tasks: contrastive 50-ep AND contrastive 100-ep.
+#
+# 50-ep encoder is used by E5 (F-B + SSL) and E6 (A1 + SSL winner).
+# 100-ep encoder is used by E7 (A3 + SSL secondary comparison).
+#
+# Outputs:
+#   50-ep:  p4_ssl_contrastive_unet_conc/pretrained.pt
+#   100-ep: p4_ssl_contrastive_unet_conc_ep100/pretrained.pt
+#
+# Must complete before E5/E6/E7 launch.
+
+set -e
+cd $PBS_O_WORKDIR
+module load Python/3.12.3-GCCcore-13.3.0
+source .venv/bin/activate
+
+EPOCHS_LIST=(50 100)
+IDX=$PBS_ARRAY_INDEX
+EPOCHS=${EPOCHS_LIST[$IDX]}
+
+echo "[array $IDX] contrastive unet ${EPOCHS}-ep pretrain on conc corpus"
+
+python -m lacewing.quantification.methods.ssl_pretrain \
+    --objective contrastive \
+    --backbone unet \
+    --corpus conc \
+    --epochs "$EPOCHS" \
+    --seed 0

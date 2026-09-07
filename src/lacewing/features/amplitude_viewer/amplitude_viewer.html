@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Amplitude Viewer</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+  :root { color-scheme: light; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    margin: 0; padding: 16px; background: #fafafa; color: #222;
+  }
+  h1 { font-size: 18px; margin: 0 0 12px 0; }
+  .status { font-size: 12px; color: #888; margin-left: 8px; }
+  .panel {
+    display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end;
+    padding: 12px 14px; background: #fff; border: 1px solid #e0e0e0;
+    border-radius: 8px; margin-bottom: 12px;
+  }
+  .field { display: flex; flex-direction: column; min-width: 130px; }
+  .field label { font-size: 11px; color: #666; margin-bottom: 4px; }
+  select, button {
+    font-size: 13px; padding: 6px 8px; border: 1px solid #c8c8c8;
+    border-radius: 6px; background: #fff; color: #222;
+    appearance: auto;
+  }
+  select option { color: #222; background: #fff; }
+  button { cursor: pointer; }
+  button:hover { background: #f0f0f0; }
+  .layout { display: grid; grid-template-columns: 1fr 320px; gap: 12px; }
+  .plots { display: flex; flex-direction: column; gap: 12px; }
+  #mainPlot { width: 100%; height: 460px; background: #fff;
+              border: 1px solid #e0e0e0; border-radius: 8px; }
+  #derivPlot { width: 100%; height: 220px; background: #fff;
+               border: 1px solid #e0e0e0; border-radius: 8px; }
+  .side {
+    background: #fff; border: 1px solid #e0e0e0; border-radius: 8px;
+    padding: 12px 14px; font-size: 13px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .side h3 { font-size: 13px; margin: 0 0 6px 0; font-family: inherit;
+             color: #444; letter-spacing: .02em; }
+  .side .block { margin-bottom: 12px; }
+  .side .kv { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; }
+  .side .kv span:nth-child(odd) { color: #666; }
+  .swatch { display: inline-block; width: 10px; height: 10px;
+            margin-right: 6px; border-radius: 2px; vertical-align: middle; }
+  @media (max-width: 1000px) {
+    .layout { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Amplitude Viewer
+  <span class="status" id="status">loading amplitude_viewer_data.json ...</span>
+</h1>
+
+<div class="panel">
+  <div class="field"><label>Chip</label><select id="chip"></select></div>
+  <div class="field"><label>Well</label><select id="well"></select></div>
+  <div class="field"><label>Pixel</label><select id="pixel"></select></div>
+  <div class="field"><label>Amplitude overlay</label><select id="amp">
+    <option value="none">(none)</option>
+    <option value="Fm">|Fm| (asymptotic)</option>
+    <option value="xs_xe">|F(xs) - F(xe)|</option>
+    <option value="fmax_fmin">F_max - F_min (fit)</option>
+    <option value="endpoints">y[end] - y[0] (raw)</option>
+  </select></div>
+  <div class="field"><label>&nbsp;</label><button id="random">Random pixel</button></div>
+</div>
+
+<div class="layout">
+  <div class="plots">
+    <div id="mainPlot"></div>
+    <div id="derivPlot"></div>
+  </div>
+  <div class="side" id="side"></div>
+</div>
+
+<script>
+const DATA_URL = "amplitude_viewer_data.json";
+const COLOR_FM   = "#1f77b4";
+const COLOR_XSXE = "#d62728";
+const COLOR_FMM  = "#2ca02c";
+const COLOR_END  = "#9467bd";
+const AMP_KEYS = ["Fm", "xs_xe", "fmax_fmin", "endpoints"];
+const AMP_COLORS = { Fm: COLOR_FM, xs_xe: COLOR_XSXE,
+                     fmax_fmin: COLOR_FMM, endpoints: COLOR_END };
+function fx(v, n) { return (v === null || v === undefined || !isFinite(v))
+                           ? "-" : Number(v).toFixed(n); }
+
+let DATA = null;
+
+async function init() {
+  const status = document.getElementById("status");
+  try {
+    const r = await fetch(DATA_URL);
+    DATA = await r.json();
+  } catch (e) {
+    status.textContent = "failed to load JSON: " + e.message;
+    return;
+  }
+  status.textContent =
+    `decimated to ${DATA.decimate_t.length} samples / curve, ` +
+    `${DATA.per_well_target} pixels/well, seed ${DATA.seed}`;
+
+  const chipSel = document.getElementById("chip");
+  const chipIds = Object.keys(DATA.chips).sort((a, b) =>
+    DATA.chips[a].short_label.localeCompare(DATA.chips[b].short_label));
+  for (const cid of chipIds) {
+    const opt = document.createElement("option");
+    opt.value = cid;
+    opt.textContent = `${DATA.chips[cid].short_label}  -  ${cid}`;
+    chipSel.appendChild(opt);
+  }
+  chipSel.addEventListener("change", onChipChange);
+  document.getElementById("well").addEventListener("change", onWellChange);
+  document.getElementById("pixel").addEventListener("change", redraw);
+  document.getElementById("amp").addEventListener("change", redraw);
+  document.getElementById("random").addEventListener("click", randomPixel);
+
+  onChipChange();
+}
+
+function onChipChange() {
+  const cid = document.getElementById("chip").value;
+  const wells = Object.keys(DATA.chips[cid].wells).sort((a, b) => +a - +b);
+  const wSel = document.getElementById("well");
+  wSel.innerHTML = "";
+  for (const w of wells) {
+    const records = DATA.chips[cid].wells[w];
+    const label0 = records[0] ? (records[0].y_label === 1 ? "pos" : "neg") : "?";
+    const opt = document.createElement("option");
+    opt.value = w;
+    opt.textContent = `well ${w} (${label0}, n=${records.length})`;
+    wSel.appendChild(opt);
+  }
+  onWellChange();
+}
+
+function onWellChange() {
+  const cid = document.getElementById("chip").value;
+  const w = document.getElementById("well").value;
+  const records = DATA.chips[cid].wells[w] || [];
+  const pSel = document.getElementById("pixel");
+  pSel.innerHTML = "";
+  records.forEach((rec, k) => {
+    const opt = document.createElement("option");
+    opt.value = k;
+    opt.textContent = `#${k}  pixel ${rec.pixel_id}  R^2=${fx(rec.r2,3)}`;
+    pSel.appendChild(opt);
+  });
+  redraw();
+}
+
+function randomPixel() {
+  const pSel = document.getElementById("pixel");
+  if (!pSel.options.length) return;
+  const k = Math.floor(Math.random() * pSel.options.length);
+  pSel.selectedIndex = k;
+  redraw();
+}
+
+function getCurrent() {
+  const cid = document.getElementById("chip").value;
+  const w = document.getElementById("well").value;
+  const k = +document.getElementById("pixel").value;
+  const recs = (DATA.chips[cid] && DATA.chips[cid].wells[w]) || [];
+  return { cid, w, k, rec: recs[k] };
+}
+
+function redraw() {
+  const { cid, w, k, rec } = getCurrent();
+  if (!rec) { Plotly.purge("mainPlot"); Plotly.purge("derivPlot"); return; }
+
+  const t = DATA.decimate_t;
+
+  // ---- main plot: raw, fit, critical points, amplitude bars
+  const traces = [];
+  traces.push({
+    x: t, y: rec.raw_y, mode: "markers", name: "raw",
+    marker: { size: 4, color: "rgba(80,80,80,0.55)" },
+    hovertemplate: "t=%{x}  y=%{y:.4f}<extra>raw</extra>",
+  });
+  traces.push({
+    x: t, y: rec.fit_y, mode: "lines", name: "5PL fit",
+    line: { color: "#ff7f0e", width: 2 },
+    hovertemplate: "t=%{x}  y=%{y:.4f}<extra>fit</extra>",
+  });
+
+  // Critical-point markers on the fit
+  const critX = [], critY = [], critText = [];
+  if (rec.xs !== null) { critX.push(rec.xs); critY.push(rec.y_xs); critText.push("xs"); }
+  if (rec.xe !== null) { critX.push(rec.xe); critY.push(rec.y_xe); critText.push("xe"); }
+  if (rec.xms !== null) { critX.push(rec.xms); critY.push(rec.y_xms); critText.push("xms"); }
+  if (critX.length) {
+    traces.push({
+      x: critX, y: critY, mode: "markers+text",
+      text: critText, textposition: "top center", textfont: { size: 10 },
+      marker: { size: 9, color: "#000", symbol: "diamond" },
+      name: "critical pts",
+      hovertemplate: "%{text}  t=%{x:.1f}  y=%{y:.4f}<extra></extra>",
+    });
+  }
+
+  const W = DATA.window;
+
+  // ---- Amplitude overlay (chosen via dropdown)
+  const ampKey = document.getElementById("amp").value;
+  let ampAnnotations = [];
+  if (ampKey !== "none" && rec.amps[ampKey]) {
+    const a = rec.amps[ampKey];
+    const color = AMP_COLORS[ampKey];
+
+    // Decide the two reference points (xA, yA) and (xB, yB) per definition.
+    // yA = lower of from/to, yB = upper (so the vertical span has a clear top/bottom).
+    let xA, yA, xB, yB;
+    if (ampKey === "Fm") {
+      // Asymptotes: y = Fb and y = Fb + Fm. Place anchors at the curve edges.
+      xA = t[0]; xB = t[t.length - 1];
+      yA = a.from; yB = a.to;
+    } else if (ampKey === "xs_xe") {
+      xA = rec.xs; yA = rec.y_xs;
+      xB = rec.xe; yB = rec.y_xe;
+    } else if (ampKey === "fmax_fmin") {
+      // argmin/argmax of fit curve over the decimated grid
+      let mnI = 0, mxI = 0;
+      for (let i = 1; i < rec.fit_y.length; i++) {
+        if (rec.fit_y[i] !== null) {
+          if (rec.fit_y[mnI] === null || rec.fit_y[i] < rec.fit_y[mnI]) mnI = i;
+          if (rec.fit_y[mxI] === null || rec.fit_y[i] > rec.fit_y[mxI]) mxI = i;
+        }
+      }
+      xA = t[mnI]; yA = rec.fit_y[mnI];
+      xB = t[mxI]; yB = rec.fit_y[mxI];
+    } else if (ampKey === "endpoints") {
+      xA = t[0]; yA = rec.raw_y[0];
+      xB = t[t.length - 1]; yB = rec.raw_y[rec.raw_y.length - 1];
+    }
+
+    if (xA !== undefined && isFinite(xA) && isFinite(xB) &&
+        isFinite(yA) && isFinite(yB)) {
+      // Gauge x: just to the right of both reference points but inside the plot.
+      const xGauge = Math.min(W * 0.96, Math.max(xA, xB) + W * 0.03);
+
+      // (1) Markers at the two reference points (filled, ringed for visibility)
+      traces.push({
+        x: [xA, xB], y: [yA, yB], mode: "markers",
+        marker: { size: 12, color: color, symbol: "circle",
+                  line: { color: "#000", width: 1 } },
+        name: a.label,
+        hovertemplate: `${a.label}<br>x=%{x:.1f}  y=%{y:.4f}<extra></extra>`,
+        showlegend: true,
+      });
+
+      // (2) Horizontal dotted lead-lines from each point to xGauge
+      traces.push({
+        x: [xA, xGauge], y: [yA, yA], mode: "lines",
+        line: { color: color, width: 1, dash: "dot" },
+        showlegend: false, hoverinfo: "skip",
+      });
+      traces.push({
+        x: [xB, xGauge], y: [yB, yB], mode: "lines",
+        line: { color: color, width: 1, dash: "dot" },
+        showlegend: false, hoverinfo: "skip",
+      });
+
+      // (3) Vertical dimension line at xGauge between the two y values
+      traces.push({
+        x: [xGauge, xGauge], y: [yA, yB], mode: "lines+markers",
+        line: { color: color, width: 2 },
+        marker: { size: 10, color: color, symbol: "line-ew-open",
+                  line: { color: color, width: 2 } },
+        showlegend: false,
+        hovertemplate: `|amp| = ${fx(a.abs, 5)}<extra></extra>`,
+      });
+
+      // (4) Numeric annotation next to the gauge
+      ampAnnotations.push({
+        x: xGauge, y: (yA + yB) / 2,
+        xref: "x", yref: "y",
+        text: `<b>|amp| = ${fx(a.abs, 4)}</b>`,
+        showarrow: false, xanchor: "left", yanchor: "middle",
+        xshift: 8,
+        font: { color: color, size: 13 },
+        bgcolor: "rgba(255,255,255,0.85)",
+        bordercolor: color, borderwidth: 1, borderpad: 3,
+      });
+    }
+  }
+
+  const layoutMain = {
+    title: `${DATA.chips[cid].short_label}  /  well ${w}  /  pixel ${rec.pixel_id}  ` +
+           `[${rec.y_label === 1 ? "POS" : "NEG"}]  R^2=${fx(rec.r2,3)}`,
+    margin: { l: 55, r: 20, t: 50, b: 40 },
+    xaxis: { title: "sample index", range: [-5, W + 5] },
+    yaxis: { title: "amplitude (V)" },
+    legend: { orientation: "h", y: -0.18 },
+    annotations: ampAnnotations,
+  };
+  Plotly.newPlot("mainPlot", traces, layoutMain,
+                 { displaylogo: false, responsive: true });
+
+  // ---- derivative plot
+  const dyTraces = [{
+    x: t, y: rec.dy_fit, mode: "lines", name: "dF/dt (fit)",
+    line: { color: "#ff7f0e", width: 1.5 },
+  }];
+  if (rec.xms !== null && rec.dy_xms !== null) {
+    dyTraces.push({
+      x: [rec.xms], y: [rec.dy_xms], mode: "markers+text",
+      text: ["xms"], textposition: "top center", textfont: { size: 10 },
+      marker: { size: 9, color: "#000", symbol: "diamond" },
+      name: "xms",
+    });
+    const TH = 0.1 * rec.dy_xms;
+    dyTraces.push({
+      x: [t[0], t[t.length - 1]], y: [TH, TH],
+      mode: "lines", name: "10% threshold",
+      line: { color: "#888", width: 1, dash: "dot" },
+    });
+  }
+  const layoutDeriv = {
+    margin: { l: 55, r: 20, t: 10, b: 40 },
+    xaxis: { title: "sample index" },
+    yaxis: { title: "dF/dt" },
+    showlegend: true, legend: { orientation: "h", y: -0.4 },
+  };
+  Plotly.newPlot("derivPlot", dyTraces, layoutDeriv,
+                 { displaylogo: false, responsive: true });
+
+  // ---- side panel
+  const p = rec.params;
+  const side = document.getElementById("side");
+  let html = "";
+  html += `<div class="block"><h3>5PL parameters</h3><div class="kv">`;
+  const fxe = (v, n) => (v === null || v === undefined || !isFinite(v))
+                          ? "-" : Number(v).toExponential(n);
+  html += `<span>Fm</span><span>${fxe(p.Fm,3)}</span>`;
+  html += `<span>Fb</span><span>${fxe(p.Fb,3)}</span>`;
+  html += `<span>Sc</span><span>${fxe(p.Sc,3)}</span>`;
+  html += `<span>Cs</span><span>${fx(p.Cs,2)}</span>`;
+  html += `<span>As</span><span>${fx(p.As,3)}</span>`;
+  html += `<span>R^2</span><span>${fx(rec.r2,4)}</span>`;
+  html += `</div></div>`;
+
+  html += `<div class="block"><h3>Critical points</h3><div class="kv">`;
+  html += `<span>xs (start)</span><span>${fx(rec.xs,1)}</span>`;
+  html += `<span>xe (end)</span><span>${fx(rec.xe,1)}</span>`;
+  html += `<span>xms (max slope)</span><span>${fx(rec.xms,1)}</span>`;
+  html += `<span>dy at xms</span><span>${fxe(rec.dy_xms,3)}</span>`;
+  html += `</div></div>`;
+
+  html += `<div class="block"><h3>Amplitudes (|signed|)</h3><div class="kv">`;
+  for (const key of AMP_KEYS) {
+    const a = rec.amps[key];
+    const sw = `<span class="swatch" style="background:${AMP_COLORS[key]}"></span>`;
+    const active = (key === ampKey) ? " style=\"font-weight:bold\"" : "";
+    html += `<span${active}>${sw}${a.label}</span><span${active}>${fx(a.abs,5)}</span>`;
+  }
+  html += `</div></div>`;
+
+  side.innerHTML = html;
+}
+
+init();
+</script>
+</body>
+</html>

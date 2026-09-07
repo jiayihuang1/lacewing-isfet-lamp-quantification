@@ -1,0 +1,34 @@
+#!/bin/bash
+#PBS -N w19_fb_unet_rerun
+#PBS -l select=1:ncpus=4:mem=32gb:ngpus=1:gpu_type=L40S
+#PBS -l walltime=03:00:00
+#PBS -J 0-1
+#PBS -j oe
+#PBS -o /rds/general/user/jh1125/home/Individual_Project/jobs/logs/
+
+set -e
+cd $PBS_O_WORKDIR
+module load Python/3.12.3-GCCcore-13.3.0
+source .venv/bin/activate
+
+# W19 supplementary — F-B sliding-window classifier with U-Net backbone
+# at window 120 stride 10. This config is the RQ2 "winning framing" and
+# feeds directly into the RQ3 combined framework's regression head; the
+# initial tranche produced seeds 0/1/2 only, and the report claims F-B
+# as the winner so it needs the same 5-seed treatment as the other
+# 5-seed contenders.
+#
+# 1 config × 2 seeds (3 and 4) = 2 tasks.
+
+IDX=$PBS_ARRAY_INDEX
+SEED=$(( 3 + IDX ))
+
+echo "[array $IDX] F-B slide_cls w120 s10 bb_unet, seed=$SEED"
+
+python -m lacewing.quantification.methods.sliding_window_cls \
+    --seed "$SEED" \
+    --window 120 --stride 10 \
+    --k_consecutive 3 --k_thr 0.7 \
+    --backbone unet \
+    --dropout 0.1 --weight-decay 0.0 \
+    --epochs 30 --lr 1e-3 --batch_size 256

@@ -1,0 +1,45 @@
+============================================================================
+Amplitude analysis: |F(xs) - F(xe)|  (5 final chips only)
+============================================================================
+chips kept: ['1e5', '1e6', '1e7', '1e8', '1e9']
+N pixels:               54780
+  positives (wells 0-4): 44811
+  NTC      (well 5)    : 9969
+R^2 on these fits: median=0.975, p10=0.915, p90=0.992
+
+----------------------------------------------------------------------------
+CLASSIFICATION : positive vs NTC
+----------------------------------------------------------------------------
+  pos: n=44811  median=0.04952  IQR=[0.04087, 0.05956]  mean=0.05094
+  neg: n=9969  median=0.03043  IQR=[0.02622, 0.03529]  mean=0.03394
+
+  pooled AUC                 : 0.8719
+  point-biserial r           : 0.2616   (p = 0.00e+00)
+  Mann-Whitney U two-sided p : 0.00e+00
+
+  Per-chip AUC (chip-batch diagnostic):
+    1e5: AUC = 0.6476   n_pos = 6633, n_neg = 836
+    1e6: AUC = 0.8976   n_pos = 10708, n_neg = 2583
+    1e7: AUC = 0.9046   n_pos = 6421, n_neg = 1958
+    1e8: AUC = 0.9131   n_pos = 8444, n_neg = 1963
+    1e9: AUC = 0.9705   n_pos = 12605, n_neg = 2629
+
+saved classification_amp.png
+
+----------------------------------------------------------------------------
+QUANTIFICATION : positives only, |amp| vs log10(concentration)
+----------------------------------------------------------------------------
+  N pos pixels with conc : 44811
+  log10(conc) levels     : [5, 6, 7, 8, 9]
+
+  per-pixel Spearman rho : 0.3678   (p = 0.00e+00)
+  per-well  Spearman rho : 0.2079   (p = 3.19e-01)   n_wells = 25
+
+  Per-chip per-well means (raw view):
+    1e5 (log10=5): w0=0.05419, w1=0.07627, w2=0.03695, w3=0.02124, w4=0.04740
+    1e6 (log10=6): w0=0.04851, w1=0.04760, w2=0.05452, w3=0.05327, w4=0.06613
+    1e7 (log10=7): w0=0.04626, w1=0.03840, w2=0.04473, w3=0.04138, w4=0.04976
+    1e8 (log10=8): w0=0.04203, w1=0.03762, w2=0.04325, w3=0.04876, w4=0.04200
+    1e9 (log10=9): w0=0.06583, w1=0.05931, w2=0.05990, w3=0.06170, w4=0.06239
+
+saved quantification_amp.png

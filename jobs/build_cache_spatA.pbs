@@ -1,0 +1,45 @@
+#!/bin/bash
+# spatA_build_caches: build the 3 spatially-smoothed caches needed by
+# spatA_sweep.pbs.  Order 0 is identity passthrough, so we still build it
+# (the sweep code looks up `<input>_spatA0.npz` for the baseline cell).
+#
+# Submit (from the project root on HPC):
+#
+#   qsub jobs/spatA_build_caches.pbs
+#
+# Cache build is per-pixel work over ~32k pixels (locked MAD k=1.5 ABCD
+# cache); CPU-bound, no GPU needed.  Order 1 took ~1 min on a laptop;
+# order 3 will be slower but still under 10 min total for all 4 orders.
+#
+#PBS -N spatA_build_caches
+#PBS -l select=1:ncpus=4:mem=16gb
+#PBS -l walltime=00:30:00
+#PBS -j oe
+#PBS -o /rds/general/user/jh1125/home/Individual_Project/jobs/logs/
+
+PROJECT_DIR="/rds/general/user/$USER/home/Individual_Project"
+LOG_DIR="$PROJECT_DIR/jobs/logs"
+mkdir -p "$LOG_DIR" || true
+
+TASK_LOG="$LOG_DIR/spatA_build_caches_${PBS_JOBID:-local}.log"
+exec > >(tee -a "$TASK_LOG") 2>&1
+
+echo "==> TASK_LOG: $TASK_LOG"
+echo "==> Started at $(date)"
+
+set -euo pipefail
+
+module load Python/3.12.3-GCCcore-13.3.0
+cd "$PROJECT_DIR"
+source .venv/bin/activate
+
+INPUT="dataset_all_filt_abcd_ntcRaw_madk1p5"
+for ORDER in 0 1 2 3; do
+    echo ""
+    echo "==> Building cache for order=$ORDER"
+    python -m lacewing.classification.data.build_spatial_filtered_dataset \
+        --input "$INPUT" --order "$ORDER"
+done
+
+echo ""
+echo "==> Finished at $(date)"

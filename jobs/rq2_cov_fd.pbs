@@ -1,0 +1,97 @@
+#!/bin/bash
+# p1_fd: F-D full-trace 1D U-Net 4-class segmentation (Paper 19 adaptation).
+#
+# 1D U-Net (base_channels=8, ~500k params). Per-timestep 4-class softmax:
+# pre-amp / onset-window / amp / plateau. TTP = first t where argmax ∈
+# {onset-window, amp}.
+#
+# Adapted from Joung et al. 2024 (paper 19) ECG delineation architecture.
+#
+# Outputs in:
+#   Analysis/quantification/methods/results/p1_fd_unet_seg_ow{OW}_spatA3/seed{SEED}/
+#
+# Submit (from the project root on HPC):
+#
+#   qsub -v SEED=0 jobs/p1_fd.pbs
+#
+# Override onset_window / epochs / base_channels at submit time:
+#
+#   qsub -v SEED=1,OW=60,BASE_CH=8 jobs/p1_fd.pbs
+#
+#PBS -N p1_fd
+#PBS -l select=1:ncpus=4:mem=16gb:ngpus=1
+#PBS -l walltime=02:00:00
+#PBS -j oe
+#PBS -o /rds/general/user/jh1125/home/Individual_Project/jobs/logs/
+
+PROJECT_DIR="/rds/general/user/$USER/home/Individual_Project"
+LOG_DIR="$PROJECT_DIR/jobs/logs"
+mkdir -p "$LOG_DIR" || true
+
+TASK_LOG="$LOG_DIR/p1_fd_${PBS_JOBID:-local}.log"
+exec > >(tee -a "$TASK_LOG") 2>&1
+
+echo "==> TASK_LOG: $TASK_LOG"
+echo "==> PBS_JOBID: ${PBS_JOBID:-<none>}"
+echo "==> hostname: $(hostname)"
+echo "==> pwd at job start: $(pwd)"
+echo "==> Started at $(date)"
+
+set -euo pipefail
+
+SEED="${SEED:-0}"
+OW="${OW:-30}"
+BASE_CH="${BASE_CH:-8}"
+EPOCHS="${EPOCHS:-30}"
+echo "==> Running F-D 1D U-Net segmentation: seed=${SEED} onset_window=${OW} base_channels=${BASE_CH} epochs=${EPOCHS}"
+
+echo "==> module list before load:"; module list 2>&1 || true
+module load Python/3.12.3-GCCcore-13.3.0
+echo "==> module list after load:"; module list 2>&1 || true
+
+cd "$PROJECT_DIR"
+echo "==> cwd is now: $(pwd)"
+
+if [[ -d .venv ]]; then
+    echo "==> activating .venv"
+    # shellcheck disable=SC1091
+    source .venv/bin/activate
+    echo "==> python is now: $(command -v python)"
+    echo "==> python version: $(python --version 2>&1)"
+else
+    echo "==> WARNING: .venv directory not found at $PROJECT_DIR/.venv"
+fi
+
+echo "==> import smoke test:"
+python -c "import sys, torch, numpy, scipy, sklearn; print('python', sys.version.split()[0], '| torch', torch.__version__, '| numpy', numpy.__version__)" || {
+    echo "==> FATAL: required packages missing."
+    exit 2
+}
+
+# --- ensure the spatA3 regression cache exists -----------------------
+CACHE_FILE="$PROJECT_DIR/Analysis/regression/data/cache/regress_all_filt_abcd_ntcRaw_madk1p5_spatA3.npz"
+if [[ ! -f "$CACHE_FILE" ]]; then
+    echo "==> spatA3 regression cache missing, building it now..."
+    python -m lacewing.quantification.regression_shared.data.build_spatial_filtered_regression_cache \
+        --input regress_all_filt_abcd_ntcRaw_madk1p5 \
+        --order 3
+else
+    echo "==> spatA3 regression cache present: $CACHE_FILE"
+fi
+
+# --- device autodetect ----------------------------------------------
+if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L | grep -q GPU; then
+    DEVICE=cuda
+else
+    DEVICE=cpu
+fi
+echo "==> Device: $DEVICE"
+
+# --- run F-D 1D U-Net segmentation -----------------------------------
+python -m lacewing.quantification.methods.unet_segmentation \
+    --seed "$SEED" \
+    --onset_window_samples "$OW" \
+    --base_channels "$BASE_CH" \
+    --epochs "$EPOCHS"
+
+echo "==> Finished at $(date)"

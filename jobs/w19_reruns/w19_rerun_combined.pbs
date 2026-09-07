@@ -1,0 +1,62 @@
+#!/bin/bash
+#PBS -N w19_combo_rerun
+#PBS -l select=1:ncpus=4:mem=32gb:ngpus=1:gpu_type=L40S
+#PBS -l walltime=03:00:00
+#PBS -J 0-9
+#PBS -j oe
+#PBS -o /rds/general/user/jh1125/home/Individual_Project/jobs/logs/
+
+set -e
+cd $PBS_O_WORKDIR
+module load Python/3.12.3-GCCcore-13.3.0
+source .venv/bin/activate
+
+# W19 — bring the top P3+P4 combined-framework sub-2min 3-seed candidates
+# up to 5 seeds, plus the pretraining-budget ablation (A3 α=0.5 with the
+# 50-ep encoder instead of the 100-ep encoder used in the current 5-seed
+# winner). Each combined config already has seeds 0/1/2 from the earlier
+# combo sweep; this job adds seeds 3/4.
+#
+# 5 configs × 2 seeds = 10 tasks.
+#
+# Index layout:
+#   CFG_IDX = IDX / 2       (0..4)
+#   SEED    = 3 + (IDX % 2)   (seed 3 or 4)
+#
+# Encoder directories:
+#   p4_ssl_contrastive_unet             = 50-ep,  τ=0.1  (legacy default path)
+#   p4_ssl_contrastive_unet_epochs100   = 100-ep, τ=0.1
+#
+# Config columns: ARCH ALPHA ENC_NAME
+CFGS=(
+    "a5  0.3  p4_ssl_contrastive_unet_epochs100"   # 3-seed best = 1.47 min
+    "a3  0.5  p4_ssl_contrastive_unet"             # 3-seed best = 1.68 min (50-ep ablation of the current 100-ep winner)
+    "a3n 0.5  p4_ssl_contrastive_unet"             # 3-seed best = 1.79 min
+    "a3n 0.3  p4_ssl_contrastive_unet_tau1"        # 3-seed best = 1.87 min (τ=1.0 variant)
+    "a3n 0.3  p4_ssl_contrastive_unet"             # 3-seed best = 1.96 min (already 3/3 pass at 3 seeds, confirms 5-seed)
+)
+
+IDX=$PBS_ARRAY_INDEX
+CFG_IDX=$(( IDX / 2 ))
+SEED=$(( 3 + (IDX % 2) ))
+
+CFG=${CFGS[$CFG_IDX]}
+ARCH=$(echo "$CFG" | awk '{print $1}')
+ALPHA=$(echo "$CFG" | awk '{print $2}')
+ENC_NAME=$(echo "$CFG" | awk '{print $3}')
+ENC_DIR="Analysis/quantification/methods/results/${ENC_NAME}"
+ENC_PATH="${ENC_DIR}/pretrained.pt"
+
+echo "[array $IDX] arch=$ARCH alpha=$ALPHA seed=$SEED enc=$ENC_NAME"
+
+if [ ! -f "$ENC_PATH" ]; then
+    echo "[ERROR] Missing encoder $ENC_PATH"
+    exit 1
+fi
+
+python -m lacewing.quantification.methods.joint_cls_quant \
+    --arch "$ARCH" --alpha "$ALPHA" --seed "$SEED" \
+    --window 120 --stride 10 \
+    --k_consecutive 3 --k_thr 0.7 \
+    --epochs 30 --lr 1e-3 --batch_size 256 \
+    --pretrained-encoder "$ENC_PATH"

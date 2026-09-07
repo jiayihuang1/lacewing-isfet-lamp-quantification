@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Per-statistic distribution viewer</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    margin: 0;
+    padding: 16px;
+    background: #fafafa;
+    color: #222;
+  }
+  h1 { margin: 0 0 8px 0; font-size: 18px; }
+  .meta { color: #666; font-size: 12px; margin-bottom: 12px; }
+
+  #controls {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    flex-wrap: wrap;
+    padding: 10px 12px;
+    background: #f1f5fb;
+    border: 1px solid #d8e3f0;
+    border-radius: 6px;
+    margin-bottom: 14px;
+    font-size: 13px;
+  }
+  #controls label { color: #333; }
+  select {
+    font-size: 13px;
+    padding: 3px 6px;
+    border: 1px solid #bbb;
+    border-radius: 4px;
+  }
+
+  #rule-picker {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 12px;
+    margin-bottom: 10px;
+  }
+  #rule-picker .header { font-weight: 600; margin-right: 10px; }
+  #rule-picker label {
+    display: inline-block;
+    margin-right: 12px;
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 3px;
+  }
+  #rule-picker label:hover { background: #f1f5fb; }
+  #rule-picker input[type=checkbox] { vertical-align: middle; margin-right: 4px; }
+  #rule-picker .swatch {
+    display: inline-block;
+    width: 22px; height: 0;
+    border-top: 2px dashed;
+    vertical-align: middle;
+    margin-right: 4px;
+  }
+  #rule-picker .actions {
+    margin-left: 8px;
+    font-size: 11px;
+    color: #1f3a6b;
+  }
+  #rule-picker .actions a {
+    margin-right: 8px;
+    cursor: pointer;
+    text-decoration: underline;
+  }
+
+  .row-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .panel {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 8px 10px;
+  }
+  .panel h3 {
+    font-size: 12px;
+    margin: 0 0 4px 0;
+    color: #333;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 3px;
+  }
+  .panel h3 .label {
+    color: #666;
+    font-weight: normal;
+  }
+  .panel h3 .label.pos { color: #1f78b4; }
+  .panel h3 .label.neg { color: #b30000; }
+  .panel canvas {
+    display: block;
+    width: 100%;
+    background: #fafafa;
+    border: 1px solid #eee;
+    border-radius: 4px;
+  }
+  .stats {
+    font-size: 10.5px;
+    color: #555;
+    margin-top: 5px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    line-height: 1.35;
+  }
+  .stats .num { color: #111; }
+  .stats .skew-pos { color: #c0392b; font-weight: 600; }
+  .stats .skew-neg { color: #2c662d; font-weight: 600; }
+  .stats .skew-sym { color: #555; }
+
+  #legend {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 12px;
+    margin-top: 10px;
+  }
+  #legend .dot, #legend .bar, #legend .line, #legend .dash {
+    display: inline-block; margin-right: 4px; vertical-align: middle;
+  }
+  #legend .dot { width: 11px; height: 11px; border-radius: 2px; }
+  #legend .bar { width: 22px; height: 11px; }
+  #legend .line { width: 22px; height: 0; border-top: 2px solid; }
+  #legend .dash { width: 22px; height: 0; border-top: 2px dashed; }
+  #legend .item { margin-right: 14px; display: inline-block; }
+  #legend .header { font-weight: 600; margin-right: 8px; }
+
+  #explainer {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 10px 14px;
+    font-size: 12.5px;
+    margin-top: 10px;
+    line-height: 1.45;
+  }
+  #explainer code {
+    background: #f5f5f5;
+    padding: 1px 4px;
+    border-radius: 2px;
+    font-size: 11.5px;
+  }
+</style>
+</head>
+<body>
+
+<h1>Per-well distribution viewer — pick a statistic, see how it's shaped per well</h1>
+<div class="meta" id="meta">loading manifest...</div>
+
+<div id="controls">
+  <label>Chip:
+    <select id="chipSel"></select>
+  </label>
+  <label>Statistic:
+    <select id="statSel">
+      <option value="dyn_range">dyn_range  (Layer A input — peak-to-trough swing)</option>
+      <option value="net_slope">net_slope  (Layer B-a input — end minus start)</option>
+      <option value="trace_min">trace_min  (Layer B-b input — minimum value over the trace)</option>
+      <option value="d_scores.mean">Layer D score — mean   (L2 to mean-of-8-neighbours)</option>
+      <option value="d_scores.median">Layer D score — median (L2 to median-of-8-neighbours)</option>
+      <option value="d_scores.kth">Layer D score — kth    (L2 to k-th nearest neighbour)</option>
+    </select>
+  </label>
+  <label>Direction of threshold:
+    <select id="dirSel">
+      <option value="lower">lower-tail (drop pixels with small values)</option>
+      <option value="upper">upper-tail (drop pixels with large values)</option>
+    </select>
+  </label>
+  <label>x-axis scale:
+    <select id="xScaleSel">
+      <option value="shared">shared across wells</option>
+      <option value="perwell">per-well</option>
+    </select>
+  </label>
+</div>
+
+<div id="rule-picker">
+  <span class="header">Show thresholds:</span>
+  <span id="rule-checks"></span>
+  <span class="actions">
+    <a id="rule-all">all</a>
+    <a id="rule-none">none</a>
+  </span>
+</div>
+
+<div id="legend">
+  <div>
+    <span class="header">Distribution overlays:</span>
+    <span class="item"><span class="bar" style="background:#cccccc"></span>histogram (counts)</span>
+    <span class="item"><span class="line" style="border-color:#1f78b4"></span>median</span>
+    <span class="item"><span class="bar" style="background:rgba(31,120,180,0.18)"></span>median ± symmetric MAD</span>
+    <span class="item"><span class="bar" style="background:rgba(255,127,14,0.25)"></span>median ± one-sided MAD (lo / hi)</span>
+  </div>
+  <div style="margin-top:5px; color:#555; font-size:11px;">
+    Layers A/B statistics (<code>dyn_range</code>, <code>net_slope</code>, <code>trace_min</code>):
+    threshold is computed once from the chip's <strong>NTC well</strong> and applied to every well.
+    Layer D statistic: threshold is computed <strong>per well</strong> from each well's own disagreement distribution.
+  </div>
+</div>
+
+<div id="meta-thr-source" style="font-size:12px; margin-bottom:8px;"></div>
+
+<div id="hist-grid" class="row-grid"></div>
+
+<div id="explainer">
+  <strong>Why this matters.</strong>
+  All rules here operate on the per-well distribution of one of these
+  statistics. The percentile rule is robust to any distribution shape,
+  but uses pure rank — no notion of "how stretched is the population".
+  The symmetric MAD rule estimates spread, but assumes the distribution
+  is approximately symmetric. When the data is heavily skewed (e.g.
+  <code>trace_min</code> or Layer D's L2 distance, which are bounded on
+  one side), symmetric MAD systematically misses the long tail. The
+  <strong>one-sided MAD</strong> rules use only the half-distribution on
+  the side of the threshold, so they ignore the opposite tail entirely.
+  The <strong>IQR (Tukey)</strong> rule is the classical skew-aware
+  alternative: <code>Q1 − k·IQR</code> (lower) / <code>Q3 + k·IQR</code>
+  (upper). Because Q1 and Q3 are independently anchored on each side of
+  the median, the upper and lower fences automatically widen with the
+  tail on their own side, with no symmetry assumption. <code>k=1.5</code>
+  is the textbook "outlier" cutoff (Tukey 1977); <code>k=3.0</code> is
+  the stricter "far-out" cutoff.
+</div>
+
+<script>
+const COLOURS = {
+  bar:        "#cccccc",
+  median:     "#1f78b4",
+  mad_sym:    "rgba(31, 120, 180, 0.18)",
+  mad_one:    "rgba(255, 127, 14, 0.25)",
+  axis:       "#555",
+};
+
+// Threshold rules to overlay on every panel. (id, label, colour, kind, param, default-on).
+//   kind = "percentile"     -> standard 5th / 95th percentile rule
+//   kind = "mad"            -> symmetric MAD: med ± k · MAD_sym
+//   kind = "mad_one_sided"  -> one-sided MAD: med − k · MAD_lo  (lower-tail)
+//                                          / med + k · MAD_hi  (upper-tail)
+//   kind = "iqr"            -> Tukey fence:   Q1 − k · IQR     (lower-tail)
+//                                          / Q3 + k · IQR     (upper-tail)
+const PERCENTILE_CUT = 5;     // lower-tail default; upper-tail uses 100 - this.
+const THRESHOLD_RULES = [
+  { id: "pct",        label: "percentile",        colour: "#d62728", kind: "percentile",                  on: true  },
+  { id: "mad_sym_15", label: "MAD-sym k=1.5",     colour: "#9467bd", kind: "mad",           k: 1.5,       on: true  },
+  { id: "mad_sym_16", label: "MAD-sym k=1.645",   colour: "#2ca02c", kind: "mad",           k: 1.645,     on: true  },
+  { id: "mad_sym_20", label: "MAD-sym k=2.0",     colour: "#ff7f0e", kind: "mad",           k: 2.0,       on: false },
+  { id: "mad_one_15", label: "MAD-1side k=1.5",   colour: "#8c564b", kind: "mad_one_sided", k: 1.5,       on: false },
+  { id: "mad_one_16", label: "MAD-1side k=1.645", colour: "#17becf", kind: "mad_one_sided", k: 1.645,     on: true  },
+  { id: "mad_one_20", label: "MAD-1side k=2.0",   colour: "#e377c2", kind: "mad_one_sided", k: 2.0,       on: false },
+  { id: "iqr_15",     label: "IQR k=1.5 (Tukey)", colour: "#7f7f7f", kind: "iqr",           k: 1.5,       on: true  },
+  { id: "iqr_30",     label: "IQR k=3.0 (far)",   colour: "#bcbd22", kind: "iqr",           k: 3.0,       on: false },
+];
+// Mutable set of rule ids that are currently selected for display.
+const selectedRules = new Set(THRESHOLD_RULES.filter(r => r.on).map(r => r.id));
+
+let manifest = null;
+let chipData = null;
+
+// --------------------------------------------------------------------
+// Utility
+// --------------------------------------------------------------------
+
+function setupCanvas(cv) {
+  const dpr = window.devicePixelRatio || 1;
+  const rect = cv.getBoundingClientRect();
+  cv.width = Math.round(rect.width * dpr);
+  cv.height = Math.round(rect.height * dpr);
+  const ctx = cv.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { ctx, w: rect.width, h: rect.height };
+}
+
+function fmt(x, n = 4) {
+  if (x === null || x === undefined || !isFinite(x)) return "—";
+  return x.toFixed(n);
+}
+
+function getNested(obj, keyPath) {
+  // Resolve e.g. "d_scores.median" → obj.d_scores.median
+  return keyPath.split(".").reduce((o, k) => (o == null ? null : o[k]), obj);
+}
+
+// --------------------------------------------------------------------
+// Robust statistics
+// --------------------------------------------------------------------
+
+function median(values) {
+  if (values.length === 0) return null;
+  const s = values.slice().sort((a, b) => a - b);
+  const n = s.length;
+  if (n % 2 === 1) return s[(n - 1) / 2];
+  return 0.5 * (s[n / 2 - 1] + s[n / 2]);
+}
+
+function symmetricMAD(values, med) {
+  if (values.length === 0) return 0;
+  const devs = values.map(v => Math.abs(v - med));
+  return 1.4826 * median(devs);
+}
+
+function lowerMAD(values, med) {
+  // MAD computed only on samples below the median
+  const lo = values.filter(v => v < med).map(v => Math.abs(v - med));
+  if (lo.length === 0) return 0;
+  return 1.4826 * median(lo);
+}
+
+function upperMAD(values, med) {
+  const hi = values.filter(v => v > med).map(v => Math.abs(v - med));
+  if (hi.length === 0) return 0;
+  return 1.4826 * median(hi);
+}
+
+function percentile(values, p) {
+  if (values.length === 0) return null;
+  const s = values.slice().sort((a, b) => a - b);
+  const idx = Math.max(0, Math.min(s.length - 1, Math.floor(p / 100 * s.length)));
+  return s[idx];
+}
+
+function quartiles(values) {
+  // Returns {q1, q3, iqr}.  Q1 = 25th pct, Q3 = 75th pct (nearest-rank).
+  if (values.length === 0) return { q1: null, q3: null, iqr: 0 };
+  const q1 = percentile(values, 25);
+  const q3 = percentile(values, 75);
+  return { q1, q3, iqr: q3 - q1 };
+}
+
+function moment_skew(values) {
+  // Standard Fisher-Pearson skewness: sample third central moment / σ³
+  const n = values.length;
+  if (n < 3) return 0;
+  let mean = 0;
+  for (const v of values) mean += v;
+  mean /= n;
+  let m2 = 0, m3 = 0;
+  for (const v of values) {
+    const d = v - mean;
+    m2 += d * d;
+    m3 += d * d * d;
+  }
+  m2 /= n;
+  m3 /= n;
+  if (m2 === 0) return 0;
+  return m3 / Math.pow(m2, 1.5);
+}
+
+// --------------------------------------------------------------------
+// Plotting
+// --------------------------------------------------------------------
+
+function makeHistogram(values, nbins, lo, hi) {
+  const counts = new Array(nbins).fill(0);
+  const w = (hi - lo) / nbins;
+  for (const v of values) {
+    if (v < lo || v > hi) continue;
+    let b = Math.floor((v - lo) / w);
+    if (b === nbins) b = nbins - 1;
+    counts[b]++;
+  }
+  const edges = [];
+  for (let i = 0; i <= nbins; i++) edges.push(lo + i * w);
+  return { counts, edges };
+}
+
+function plotHistogram(cv, values, opts) {
+  const { ctx, w, h } = setupCanvas(cv);
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, w, h);
+
+  if (values.length === 0) {
+    ctx.fillStyle = "#bbb";
+    ctx.font = "11px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("(no data)", w / 2, h / 2);
+    return;
+  }
+
+  const margin = { left: 32, right: 6, top: 6, bot: 22 };
+  const xlo = opts.xlo, xhi = opts.xhi;
+  const hist = makeHistogram(values, opts.nbins || 50, xlo, xhi);
+  const counts = hist.counts;
+  const edges = hist.edges;
+  const ymax = Math.max(...counts) || 1;
+
+  // Axes
+  ctx.strokeStyle = COLOURS.axis;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(margin.left, margin.top);
+  ctx.lineTo(margin.left, h - margin.bot);
+  ctx.lineTo(w - margin.right, h - margin.bot);
+  ctx.stroke();
+
+  function px_x(xv) {
+    return margin.left + (xv - xlo) / (xhi - xlo) * (w - margin.right - margin.left);
+  }
+
+  // X ticks
+  ctx.fillStyle = "#444";
+  ctx.font = "9.5px sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  for (let i = 0; i <= 4; i++) {
+    const v = xlo + (xhi - xlo) * i / 4;
+    const x = px_x(v);
+    ctx.fillText(v.toFixed(3), x, h - margin.bot + 3);
+    ctx.beginPath(); ctx.strokeStyle = COLOURS.axis;
+    ctx.moveTo(x, h - margin.bot); ctx.lineTo(x, h - margin.bot + 3); ctx.stroke();
+  }
+
+  // Overlay: MAD bands FIRST (so bars sit on top)
+  if (opts.madSymBand) {
+    const [lo, hi] = opts.madSymBand;
+    const xLo = px_x(lo), xHi = px_x(hi);
+    if (xHi > margin.left && xLo < w - margin.right) {
+      ctx.fillStyle = COLOURS.mad_sym;
+      ctx.fillRect(Math.max(xLo, margin.left), margin.top,
+                   Math.min(xHi, w - margin.right) - Math.max(xLo, margin.left),
+                   h - margin.top - margin.bot);
+    }
+  }
+  if (opts.madAsymBand) {
+    const [lo, hi] = opts.madAsymBand;
+    const xLo = px_x(lo), xHi = px_x(hi);
+    if (xHi > margin.left && xLo < w - margin.right) {
+      ctx.fillStyle = COLOURS.mad_one;
+      ctx.fillRect(Math.max(xLo, margin.left), margin.top,
+                   Math.min(xHi, w - margin.right) - Math.max(xLo, margin.left),
+                   h - margin.top - margin.bot);
+    }
+  }
+
+  // Bars
+  for (let i = 0; i < counts.length; i++) {
+    const x0 = px_x(edges[i]);
+    const x1 = px_x(edges[i + 1]);
+    const barH = (counts[i] / ymax) * (h - margin.top - margin.bot);
+    ctx.fillStyle = COLOURS.bar;
+    ctx.fillRect(x0, h - margin.bot - barH, Math.max(0.5, x1 - x0 - 0.3), barH);
+  }
+
+  function drawVLine(xv, colour, dashed, label, labelYFrac) {
+    const x = px_x(xv);
+    if (x < margin.left || x > w - margin.right) return;
+    ctx.strokeStyle = colour;
+    ctx.lineWidth = 1.4;
+    if (dashed) ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.moveTo(x, margin.top); ctx.lineTo(x, h - margin.bot);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    if (label) {
+      ctx.fillStyle = colour;
+      ctx.font = "9px sans-serif";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      const ly = margin.top + (labelYFrac || 0) * (h - margin.top - margin.bot);
+      ctx.fillText(label, x + 2, ly);
+    }
+  }
+
+  if (opts.median !== undefined) drawVLine(opts.median, COLOURS.median, false, "median", 0);
+
+  // Threshold rules — drawn at staggered y positions so the labels don't overlap.
+  if (opts.thresholdLines && opts.thresholdLines.length) {
+    const nLines = opts.thresholdLines.length;
+    opts.thresholdLines.forEach((tl, i) => {
+      if (tl.value === undefined || tl.value === null || !isFinite(tl.value)) return;
+      const yFrac = 0.1 + 0.8 * (i / Math.max(1, nLines - 1));
+      drawVLine(tl.value, tl.colour, true, tl.label, yFrac);
+    });
+  }
+}
+
+// --------------------------------------------------------------------
+// Per-well render
+// --------------------------------------------------------------------
+
+function gatherStatPerWell(statKey) {
+  // Returns {wellId: array-of-values, ...}
+  const out = {};
+  for (const w_key of Object.keys(chipData.wells).sort((a, b) => +a - +b)) {
+    const ps = chipData.wells[w_key].pixels;
+    const vals = [];
+    for (const p of ps) {
+      const v = getNested(p, statKey);
+      if (v !== null && v !== undefined && isFinite(v)) vals.push(v);
+    }
+    out[w_key] = vals;
+  }
+  return out;
+}
+
+function computeThresholdsForRules(refValues, direction) {
+  // Given the reference distribution (NTC well for A/B, the well itself
+  // for Layer D), compute the cut value for every rule in
+  // THRESHOLD_RULES.  Returns array aligned with THRESHOLD_RULES.
+  if (refValues.length === 0) {
+    return THRESHOLD_RULES.map(r => ({id: r.id, label: r.label, colour: r.colour, value: null}));
+  }
+  const med = median(refValues);
+  const madSym = symmetricMAD(refValues, med);
+  const madLo  = lowerMAD(refValues, med);
+  const madHi  = upperMAD(refValues, med);
+  const { q1, q3, iqr } = quartiles(refValues);
+  return THRESHOLD_RULES.map(r => {
+    let v = null;
+    if (r.kind === "percentile") {
+      v = direction === "lower"
+        ? percentile(refValues, PERCENTILE_CUT)
+        : percentile(refValues, 100 - PERCENTILE_CUT);
+    } else if (r.kind === "mad") {
+      v = direction === "lower"
+        ? med - r.k * madSym
+        : med + r.k * madSym;
+    } else if (r.kind === "mad_one_sided") {
+      v = direction === "lower"
+        ? med - r.k * madLo
+        : med + r.k * madHi;
+    } else if (r.kind === "iqr") {
+      v = direction === "lower"
+        ? q1 - r.k * iqr
+        : q3 + r.k * iqr;
+    }
+    return { id: r.id, label: r.label, colour: r.colour, value: v };
+  });
+}
+
+function renderAll() {
+  if (!chipData) return;
+  const statKey = document.getElementById("statSel").value;
+  const direction = document.getElementById("dirSel").value;
+  const xScaleMode = document.getElementById("xScaleSel").value;
+
+  const perWell = gatherStatPerWell(statKey);
+  const wellKeys = Object.keys(perWell);
+
+  // Determine where the thresholds come from:
+  //   - Layer A/B statistics (dyn_range/net_slope/trace_min): NTC well only.
+  //   - Layer D scores: each well's own distribution.
+  const isLayerDStat = statKey.startsWith("d_scores.");
+  const ntcWellKey = String(manifest.ntc_well);
+  const ntcVals = perWell[ntcWellKey] || [];
+
+  // Per-rule thresholds computed once from the NTC for Layers A/B.
+  const ntcThresholds = computeThresholdsForRules(ntcVals, direction);
+
+  // Compute a shared x-range (1st to 99th percentile across all wells, with 5% pad)
+  let allVals = [];
+  for (const k of wellKeys) allVals = allVals.concat(perWell[k]);
+  let sharedLo = -1, sharedHi = 1;
+  if (allVals.length > 0) {
+    const sorted = allVals.slice().sort((a, b) => a - b);
+    sharedLo = sorted[Math.floor(0.005 * sorted.length)];
+    sharedHi = sorted[Math.floor(0.995 * sorted.length)];
+    const span = sharedHi - sharedLo;
+    sharedLo -= 0.05 * span;
+    sharedHi += 0.05 * span;
+    if (sharedHi - sharedLo < 1e-9) {
+      sharedHi = sharedLo + 1e-6;
+    }
+  }
+
+  // Build the grid
+  const grid = document.getElementById("hist-grid");
+  grid.innerHTML = "";
+  for (const w_key of wellKeys) {
+    const vals = perWell[w_key];
+    const label = chipData.wells[w_key].label;
+    const labelLine = label === 1
+      ? '<span class="label pos">label = 1 (positive)</span>'
+      : '<span class="label neg">label = 0 (NTC / negative)</span>';
+
+    const med = median(vals);
+    const madSym = symmetricMAD(vals, med);
+    const madLo  = lowerMAD(vals, med);
+    const madHi  = upperMAD(vals, med);
+    const skew   = moment_skew(vals);
+
+    // For Layer A/B: every well's panel uses the NTC-derived thresholds.
+    // For Layer D:  each well uses its own per-well thresholds.
+    const allThresholds = isLayerDStat
+      ? computeThresholdsForRules(vals, direction)
+      : ntcThresholds;
+    // Filter to user-selected rules only.
+    const thresholdLines = allThresholds.filter(t => selectedRules.has(t.id));
+
+    let xlo, xhi;
+    if (xScaleMode === "shared") {
+      xlo = sharedLo; xhi = sharedHi;
+    } else {
+      if (vals.length > 0) {
+        const sorted = vals.slice().sort((a, b) => a - b);
+        xlo = sorted[Math.floor(0.005 * sorted.length)];
+        xhi = sorted[Math.floor(0.995 * sorted.length)];
+        const span = xhi - xlo;
+        xlo -= 0.05 * span; xhi += 0.05 * span;
+        if (xhi - xlo < 1e-9) xhi = xlo + 1e-6;
+      } else {
+        xlo = -1; xhi = 1;
+      }
+    }
+
+    // Expand x-range so every selected threshold value is visible.
+    // This is what makes IQR k=1.5 / one-sided MAD k=1.645 appear when
+    // they land outside the 99th percentile of the raw data.
+    {
+      let needsClose = false;
+      for (const tl of thresholdLines) {
+        if (tl.value === null || tl.value === undefined || !isFinite(tl.value)) continue;
+        const span = xhi - xlo;
+        if (tl.value < xlo) { xlo = tl.value - 0.05 * span; needsClose = true; }
+        if (tl.value > xhi) { xhi = tl.value + 0.05 * span; needsClose = true; }
+      }
+      if (needsClose && xhi - xlo < 1e-9) xhi = xlo + 1e-6;
+    }
+
+    // skew tag
+    let skewClass = "skew-sym", skewWord = "≈ symmetric";
+    if (skew > 0.5) { skewClass = "skew-pos"; skewWord = "right-skewed"; }
+    else if (skew < -0.5) { skewClass = "skew-pos"; skewWord = "left-skewed"; }
+
+    // Per-well threshold-value summary text, four-up
+    const thrSummary = thresholdLines
+      .map(t => `${t.label}=<span class="num">${fmt(t.value, 4)}</span>`)
+      .join("&nbsp;&nbsp;");
+
+    const isNtc = (String(w_key) === ntcWellKey);
+    const ntcBadge = isNtc
+      ? ' &nbsp; <span style="background:#fff3b0; padding:1px 5px; border-radius:2px; font-size:10px;">NTC: threshold source for A/B</span>'
+      : '';
+
+    const panel = document.createElement("div");
+    panel.className = "panel";
+    panel.innerHTML = `
+      <h3>well ${w_key} &nbsp;${labelLine}${ntcBadge}</h3>
+      <canvas id="cv-w${w_key}" height="170"></canvas>
+      <div class="stats">
+        n=<span class="num">${vals.length}</span>
+        &nbsp; med=<span class="num">${fmt(med, 4)}</span>
+        &nbsp; <span class="${skewClass}">skew=${fmt(skew, 2)} (${skewWord})</span><br>
+        MAD<sub>sym</sub>=<span class="num">${fmt(madSym, 4)}</span>
+        &nbsp; MAD<sub>lo</sub>=<span class="num">${fmt(madLo, 4)}</span>
+        &nbsp; MAD<sub>hi</sub>=<span class="num">${fmt(madHi, 4)}</span><br>
+        ${thrSummary}
+      </div>
+    `;
+    grid.appendChild(panel);
+
+    const cv = panel.querySelector("canvas");
+    const madBand = [med - madSym, med + madSym];
+    const madAsymBand = [med - madLo, med + madHi];
+
+    plotHistogram(cv, vals, {
+      nbins: 50,
+      xlo, xhi,
+      median: med,
+      madSymBand: madBand,
+      madAsymBand: madAsymBand,
+      thresholdLines: thresholdLines,
+    });
+  }
+
+  // Surface a one-line summary above the grid clarifying where the thresholds come from
+  const note = document.getElementById("meta-thr-source");
+  if (note) {
+    if (isLayerDStat) {
+      note.innerHTML = '<span style="color:#1f3a6b">Threshold rules computed <strong>per well</strong> from each well\'s own disagreement distribution (Layer D semantics).</span>';
+    } else {
+      note.innerHTML = `<span style="color:#1f3a6b">Threshold rules computed <strong>once from the NTC well</strong> (well ${ntcWellKey}, highlighted) and the same threshold is applied to every well's panel. This matches how Layers A and B operate in production.</span>`;
+    }
+  }
+}
+
+// --------------------------------------------------------------------
+// Bootstrap
+// --------------------------------------------------------------------
+
+function buildRulePicker() {
+  const host = document.getElementById("rule-checks");
+  host.innerHTML = "";
+  THRESHOLD_RULES.forEach(r => {
+    const lab = document.createElement("label");
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = selectedRules.has(r.id);
+    cb.dataset.ruleId = r.id;
+    cb.addEventListener("change", () => {
+      if (cb.checked) selectedRules.add(r.id);
+      else selectedRules.delete(r.id);
+      renderAll();
+    });
+    const swatch = document.createElement("span");
+    swatch.className = "swatch";
+    swatch.style.borderColor = r.colour;
+    lab.appendChild(cb);
+    lab.appendChild(swatch);
+    lab.appendChild(document.createTextNode(r.label));
+    host.appendChild(lab);
+  });
+  document.getElementById("rule-all").addEventListener("click", () => {
+    THRESHOLD_RULES.forEach(r => selectedRules.add(r.id));
+    host.querySelectorAll("input[type=checkbox]").forEach(cb => cb.checked = true);
+    renderAll();
+  });
+  document.getElementById("rule-none").addEventListener("click", () => {
+    selectedRules.clear();
+    host.querySelectorAll("input[type=checkbox]").forEach(cb => cb.checked = false);
+    renderAll();
+  });
+}
+
+async function loadManifest() {
+  const r = await fetch("filter_data/manifest.json");
+  manifest = await r.json();
+  document.getElementById("meta").textContent =
+    `data source: filter_data/ (percentile-rule exporter) | chips available: ${manifest.chips.length} | NTC well = ${manifest.ntc_well}`;
+
+  const sel = document.getElementById("chipSel");
+  sel.innerHTML = "";
+  manifest.chips.forEach(c => {
+    const o = document.createElement("option");
+    o.value = c.json;
+    o.textContent = c.chip;
+    sel.appendChild(o);
+  });
+
+  sel.onchange = () => loadChip(sel.value);
+
+  document.getElementById("statSel").onchange = () => {
+    // Layer D scores are upper-tail; per-pixel statistics are lower-tail.
+    // Auto-set direction sensibly when statistic changes.
+    const v = document.getElementById("statSel").value;
+    if (v.startsWith("d_scores.")) {
+      document.getElementById("dirSel").value = "upper";
+    } else {
+      document.getElementById("dirSel").value = "lower";
+    }
+    renderAll();
+  };
+  document.getElementById("dirSel").onchange = renderAll;
+  document.getElementById("xScaleSel").onchange = renderAll;
+  window.addEventListener("resize", renderAll);
+
+  buildRulePicker();
+  loadChip(sel.value);
+}
+
+async function loadChip(jsonName) {
+  const r = await fetch("filter_data/" + jsonName);
+  chipData = await r.json();
+  renderAll();
+}
+
+loadManifest();
+</script>
+
+</body>
+</html>

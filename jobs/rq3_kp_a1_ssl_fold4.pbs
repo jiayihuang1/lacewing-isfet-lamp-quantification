@@ -1,0 +1,39 @@
+#!/bin/bash
+#PBS -N conc_e6f4_a1_ssl
+#PBS -l select=1:ncpus=4:mem=32gb:ngpus=1:gpu_type=L40S
+#PBS -l walltime=03:30:00
+#PBS -J 0-4
+#PBS -j oe
+#PBS -o /rds/general/user/jh1125/home/Individual_Project/jobs/logs/
+
+# E6 fold-4-only: A1 joint + contrastive SSL 50-ep (RQ3 CoV winner recipe)
+# on KP, chip 4 as test. 5 seeds.
+
+set -e
+cd $PBS_O_WORKDIR
+module load Python/3.12.3-GCCcore-13.3.0
+source .venv/bin/activate
+
+SEED=$PBS_ARRAY_INDEX
+FOLD=4
+
+ENCODER_PATH="Analysis/quantification/methods/results/p4_ssl_contrastive_unet_conc/pretrained.pt"
+
+if [ ! -f "$ENCODER_PATH" ]; then
+    echo "ERROR: pretrained encoder not found at $ENCODER_PATH"
+    exit 1
+fi
+
+echo "[array $PBS_ARRAY_INDEX] arch=a1 fold=loco${FOLD} seed=$SEED encoder=$ENCODER_PATH"
+
+python -m lacewing.quantification.methods.joint_cls_quant \
+    --cache-stem "regress_conc_loco${FOLD}" \
+    --arch a1 \
+    --alpha 0.5 \
+    --seed "$SEED" \
+    --window 120 \
+    --stride 10 \
+    --k_consecutive 3 \
+    --k_thr 0.7 \
+    --epochs 30 \
+    --pretrained-encoder "$ENCODER_PATH"

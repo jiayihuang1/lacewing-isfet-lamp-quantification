@@ -1,0 +1,34 @@
+#!/bin/bash
+#PBS -N p3_joint
+#PBS -l select=1:ncpus=4:mem=32gb:ngpus=1:gpu_type=L40S
+#PBS -l walltime=03:00:00
+#PBS -J 0-35
+#PBS -j oe
+#PBS -o /rds/general/user/jh1125/home/Individual_Project/jobs/logs/
+
+set -e
+cd $PBS_O_WORKDIR
+module load Python/3.12.3-GCCcore-13.3.0
+source .venv/bin/activate
+
+# 4 architectures × 3 α × 3 seeds = 36 tasks.
+ARCHES=("a1" "a2" "a3" "a4")
+ALPHAS=("0.3" "0.5" "0.7")
+SEEDS=(0 1 2)
+
+IDX=$PBS_ARRAY_INDEX
+ARCH_IDX=$(( IDX / 9 ))
+REMAIN=$(( IDX % 9 ))
+ALPHA_IDX=$(( REMAIN / 3 ))
+SEED_IDX=$(( REMAIN % 3 ))
+ARCH=${ARCHES[$ARCH_IDX]}
+ALPHA=${ALPHAS[$ALPHA_IDX]}
+SEED=${SEEDS[$SEED_IDX]}
+
+echo "[array $IDX] arch=$ARCH alpha=$ALPHA seed=$SEED"
+
+python -m lacewing.quantification.methods.joint_cls_quant \
+    --arch "$ARCH" --alpha "$ALPHA" --seed "$SEED" \
+    --window 120 --stride 10 \
+    --k_consecutive 3 --k_thr 0.7 \
+    --epochs 30 --lr 1e-3 --batch_size 256

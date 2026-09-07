@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# Large regenerable outputs
+**/cache/
+**/checkpoints/
+**/runs/
+**/output/
+*.npz
+*.pt
+*.ckpt
+
+# Per-run experiment output (regenerate from `qsub jobs/*.pbs`)
+src/lacewing/classification/results/
+src/lacewing/classification/data/cache/
+src/lacewing/quantification/results/
+src/lacewing/quantification/methods/results/
+src/lacewing/quantification/methods/cache/
+src/lacewing/features/amplitude_viewer/*.json
+src/lacewing/preprocessing/data_quality/filter_data*/
+src/lacewing/preprocessing/data_quality/kp_preproc_viewer_data/
+src/lacewing/quantification/viewer/*_data.json
+src/lacewing/quantification/viewer/*_standalone.html
+src/lacewing/quantification/output/
+
+# Local data symlinks (Data/ is your local raw-data folder — never ship)
+/Data
+/Data/
+
+# Stale legacy path leaks — ssl_pretrain.py and build_systematic_ttp_viewer.py
+# still use hardcoded "Analysis/..." output paths from the pre-restructure
+# layout. Until those are patched, ignore the incidentally-created dirs.
+/Analysis/
+src/Analysis/
+
+# HPC logs
+jobs/logs/
+
+# Backups
+*.bak
+*_backup*.json

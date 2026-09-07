@@ -1,0 +1,124 @@
+#!/bin/bash
+# exp8 layer-progression extension: MAD-based threshold sweep on the
+# {A, AB, ABC} layer subsets crossed with k in {1.5, 1.645, 2.0}.
+# (The ABCD configurations at all 6 k values were already completed
+# by the original exp8_sweep.pbs run -- those are not re-run here.)
+#
+# 9 experiments x 5 models x 10 seeds = 450 array elements (0..449).
+#
+# Each element runs ONE (experiment, model, seed) cell using the
+# pre-built filtered cache.  Build the 9 new caches BEFORE submitting
+# the array, by running once on a login node (CPU only):
+#
+#   python -m lacewing.classification.experiments.run_exp8 --build-all-caches
+#
+# (The original 6 ABCD caches already exist on disk and will be
+# skipped by the idempotent cache-builder.)
+#
+# Then submit (from the project root on HPC):
+#
+#   qsub jobs/exp8_layer_sweep.pbs
+#
+# Monitor:
+#
+#   qstat -t -u $USER
+#
+#PBS -N exp8_layer_sweep
+#PBS -J 0-449
+#PBS -l select=1:ncpus=4:mem=16gb:ngpus=1
+#PBS -l walltime=01:00:00
+#PBS -j oe
+# Absolute path required (PBS does NOT expand $HOME in directives).
+#PBS -o /rds/general/user/jh1125/home/Individual_Project/jobs/logs/
+
+# Defensive logging setup first; strict mode after.
+PROJECT_DIR="/rds/general/user/$USER/home/Individual_Project"
+LOG_DIR="$PROJECT_DIR/jobs/logs"
+mkdir -p "$LOG_DIR" || true
+
+TASK_LOG="$LOG_DIR/exp8layer_${PBS_JOBID:-local}_idx${PBS_ARRAY_INDEX:-0}.log"
+exec > >(tee -a "$TASK_LOG") 2>&1
+
+echo "==> TASK_LOG: $TASK_LOG"
+echo "==> PBS_JOBID: ${PBS_JOBID:-<none>}"
+echo "==> PBS_ARRAY_INDEX: ${PBS_ARRAY_INDEX:-<none>}"
+echo "==> hostname: $(hostname)"
+echo "==> pwd at job start: $(pwd)"
+echo "==> Started at $(date)"
+
+set -euo pipefail
+
+# --- map array index to (experiment, model, seed) -------------------
+# Layer-progression extension only: 9 new configs ordered by
+# (k, layers) so the experiment groups are contiguous in the array.
+EXPERIMENTS=(
+    exp8_A_ntcRaw_madk1.5
+    exp8_AB_ntcRaw_madk1.5
+    exp8_ABC_ntcRaw_madk1.5
+    exp8_A_ntcRaw_madk1.645
+    exp8_AB_ntcRaw_madk1.645
+    exp8_ABC_ntcRaw_madk1.645
+    exp8_A_ntcRaw_madk2.0
+    exp8_AB_ntcRaw_madk2.0
+    exp8_ABC_ntcRaw_madk2.0
+)
+MODELS=(ann cnn1d fcn resnet inception)
+SEEDS=(0 1 2 3 4 5 6 7 8 9)
+
+N_MODELS=${#MODELS[@]}
+N_SEEDS=${#SEEDS[@]}
+N_PER_EXP=$(( N_MODELS * N_SEEDS ))           # = 50
+
+IDX=${PBS_ARRAY_INDEX:-0}
+EXP_I=$(( IDX / N_PER_EXP ))
+REM=$(( IDX % N_PER_EXP ))
+MODEL_I=$(( REM / N_SEEDS ))
+SEED_I=$(( REM % N_SEEDS ))
+
+EXPERIMENT="${EXPERIMENTS[$EXP_I]}"
+MODEL="${MODELS[$MODEL_I]}"
+SEED="${SEEDS[$SEED_I]}"
+
+echo "==> Array task ${IDX}: experiment=${EXPERIMENT} model=${MODEL} seed=${SEED}"
+
+# --- module load + venv ---------------------------------------------
+echo "==> module list before load:"; module list 2>&1 || true
+module load Python/3.12.3-GCCcore-13.3.0
+echo "==> module list after load:"; module list 2>&1 || true
+
+cd "$PROJECT_DIR"
+echo "==> cwd is now: $(pwd)"
+
+if [[ -d .venv ]]; then
+    echo "==> activating .venv"
+    # shellcheck disable=SC1091
+    source .venv/bin/activate
+    echo "==> python is now: $(command -v python)"
+    echo "==> python version: $(python --version 2>&1)"
+else
+    echo "==> WARNING: .venv directory not found at $PROJECT_DIR/.venv"
+fi
+
+# Quick import smoke test.
+echo "==> import smoke test:"
+python -c "import sys, torch, numpy, scipy, sklearn, yaml; print('python', sys.version.split()[0], '| torch', torch.__version__, '| numpy', numpy.__version__)" || {
+    echo "==> FATAL: required packages missing."
+    exit 2
+}
+
+# --- device autodetect ----------------------------------------------
+if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L | grep -q GPU; then
+    DEVICE=cuda
+else
+    DEVICE=cpu
+fi
+echo "==> Device: $DEVICE"
+
+# --- run one cell ---------------------------------------------------
+python -m lacewing.classification.experiments.run_exp8 \
+    --experiment "$EXPERIMENT" \
+    --model "$MODEL" \
+    --seed "$SEED" \
+    --device "$DEVICE"
+
+echo "==> Finished at $(date)"

@@ -1,0 +1,40 @@
+#!/bin/bash
+#PBS -N w19_cls_side_eval
+#PBS -l select=1:ncpus=4:mem=16gb:ngpus=1:gpu_type=L40S
+#PBS -l walltime=01:00:00
+#PBS -J 0-9
+#PBS -j oe
+#PBS -o /rds/general/user/jh1125/home/Individual_Project/jobs/logs/
+
+set -e
+cd $PBS_O_WORKDIR
+module load Python/3.12.3-GCCcore-13.3.0
+source .venv/bin/activate
+
+# W19 --- score the classification-head output of the joint framework on
+# the SD test chip mixed pixel pool (amp+ wells 0-4 + NTC well 5).
+#
+# Two contenders x 5 seeds = 10 tasks.
+#
+# Index layout:
+#   IDX 0-4  = A1 alpha=0.5 SSL 50-ep,  seeds 0-4
+#   IDX 5-9  = A3 alpha=0.5 SSL 100-ep, seeds 0-4
+
+CONFIGS=(
+    "p3_a1_alpha0.5_unet_w120_stride10_ptcontrastive"
+    "p3_a3_alpha0.5_unet_w120_stride10_ptcontrastive_epochs100"
+)
+
+IDX=$PBS_ARRAY_INDEX
+CFG_IDX=$(( IDX / 5 ))
+SEED=$(( IDX % 5 ))
+CFG=${CONFIGS[$CFG_IDX]}
+RUN_DIR="Analysis/quantification/methods/results/${CFG}/seed${SEED}"
+
+echo "[array $IDX] cfg=$CFG seed=$SEED"
+echo "[array $IDX] run_dir=$RUN_DIR"
+
+python -m lacewing.quantification.eval.cls_side_eval \
+    --run-dir "$RUN_DIR" \
+    --window 120 --stride 10 \
+    --batch-size 512
